@@ -28,7 +28,7 @@ const userSchema = new mongoose.Schema({
     },
     role: {
         type: String,
-        enum: ['admin', 'user'],
+        enum: ['root', 'admin', 'user'],
         default: 'user'
     },
     sex: {
@@ -39,7 +39,12 @@ const userSchema = new mongoose.Schema({
     telephoneNumber: {
         type: String,
         required: false
-    }
+    },
+    forcePasswordChange: {
+        type: Boolean,
+        default: false
+    },
+    passwordChangedAt: Date
 }, { timestamps: true });
 
 // Hash password before saving
