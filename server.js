@@ -16,12 +16,18 @@ const userRoutes = require('./routes/userRoutes');
 const invoiceRoutes = require('./routes/invoiceRoutes');
 const businessRoutes = require('./routes/businessRoutes');
 const productRoutes = require('./routes/productRoutes');
+const clientRoutes = require('./routes/clientRoutes');
+const projectRoutes = require('./routes/projectRoutes');
+const supplierRoutes = require('./routes/supplierRoutes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/business', businessRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/clients', clientRoutes);
+app.use('/api/projects', projectRoutes);
+app.use('/api/suppliers', supplierRoutes);
 
 app.get('/', (req, res) => {
     res.send('Invoice Printer API is running...');
