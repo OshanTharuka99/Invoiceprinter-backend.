@@ -119,8 +119,17 @@ exports.changePassword = async (req, res) => {
         const { currentPassword, newPassword } = req.body;
         const user = await User.findById(req.user._id).select('+password');
 
-        if (!user || !(await user.correctPassword(currentPassword, user.password))) {
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        // If currentPassword is provided (from a normal settings change), verify it
+        if (currentPassword && !(await user.correctPassword(currentPassword, user.password))) {
             return res.status(401).json({ message: 'Incorrect current password' });
+        }
+
+        // PREVENTION: Ensure the new password is not the same as the current hashed one
+        const isSamePassword = await user.correctPassword(newPassword, user.password);
+        if (isSamePassword) {
+            return res.status(400).json({ message: 'New password cannot be the same as your current password. Please choose a new unique password.' });
         }
 
         user.password = newPassword;
@@ -128,7 +137,11 @@ exports.changePassword = async (req, res) => {
         user.passwordChangedAt = Date.now();
         await user.save();
 
-        res.status(200).json({ status: 'success', message: 'Password changed successfully' });
+        res.status(200).json({ 
+            status: 'success', 
+            message: 'Password changed successfully',
+            data: { user }
+        });
     } catch (error) {
         res.status(400).json({ status: 'fail', message: error.message });
     }
