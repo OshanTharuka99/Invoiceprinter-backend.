@@ -89,7 +89,20 @@ const businessDetailsSchema = new mongoose.Schema({
             type: Number,
             default: 0
         }
-    }]
+    }],
+    quotationLogo: {
+        type: String // We will store this as a Base64 string for simplicity
+    },
+    quotationTerms: {
+        type: String,
+        trim: true,
+        default: 'Standard terms and conditions apply.'
+    },
+    quotationNotes: {
+        type: String,
+        trim: true,
+        default: ''
+    }
 }, {
     timestamps: true
 });

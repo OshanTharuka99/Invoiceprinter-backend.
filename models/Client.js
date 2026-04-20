@@ -32,7 +32,7 @@ const clientSchema = new mongoose.Schema({
 
 clientSchema.pre('validate', function(next) {
     if (!this.telephoneNumber && !this.whatsappNumber && !this.address && !this.emailAddress) {
-        this.invalidate('contact', 'At least one contact method (Telephone, WhatsApp, Address, or Email) must be provided.');
+        return next(new Error('At least one contact method (Telephone, WhatsApp, Address, or Email) must be provided.'));
     }
     next();
 });
