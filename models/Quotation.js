@@ -6,6 +6,12 @@ const appliedDiscountSchema = new mongoose.Schema({
     value: { type: Number, required: true },
     amount: { type: Number, default: 0 }
 }, { _id: false });
+const appliedTaxSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    type: { type: String, enum: ['percentage', 'fixed'], default: 'percentage' },
+    value: { type: Number, required: true },
+    amount: { type: Number, default: 0 }
+}, { _id: false });
 
 const quotationSchema = new mongoose.Schema({
     quotationId: {
@@ -49,8 +55,8 @@ const quotationSchema = new mongoose.Schema({
     appliedDiscounts: [appliedDiscountSchema],
     discountTotal: { type: Number, default: 0 },
     hasTax: { type: Boolean, default: false },
-    taxName: { type: String, default: 'VAT' },
-    taxPercentage: { type: Number, default: 0 },
+    appliedTaxes: [appliedTaxSchema],
+    taxTotal: { type: Number, default: 0 },
     finalTotal: { type: Number, required: true, min: 0 },
     validDate: { type: Date, default: null },
     currency: { type: String, default: 'primary' },
