@@ -22,19 +22,12 @@ const clientSchema = new mongoose.Schema({
         enum: ['Business', 'Organization', 'Person'],
         required: true
     },
-    telephoneNumber: { type: String, trim: true },
-    whatsappNumber: { type: String, trim: true },
-    address: { type: String, trim: true },
-    emailAddress: { type: String, trim: true, lowercase: true }
+    telephoneNumber: { type: String, trim: true, default: '' },
+    whatsappNumber: { type: String, trim: true, default: '' },
+    address: { type: String, trim: true, default: '' },
+    emailAddress: { type: String, trim: true, lowercase: true, default: '' }
 }, {
     timestamps: true
-});
-
-clientSchema.pre('validate', function(next) {
-    if (!this.telephoneNumber && !this.whatsappNumber && !this.address && !this.emailAddress) {
-        return next(new Error('At least one contact method (Telephone, WhatsApp, Address, or Email) must be provided.'));
-    }
-    next();
 });
 
 module.exports = mongoose.model('Client', clientSchema);

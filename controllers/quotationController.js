@@ -1,5 +1,21 @@
 const Quotation = require('../models/Quotation');
 const QuotationDeleteRequest = require('../models/QuotationDeleteRequest');
+const Notification = require('../models/Notification');
+const User = require('../models/User');
+
+const createNotification = async (recipientId, type, title, message, relatedId = null) => {
+    try {
+        await Notification.create({
+            recipient: recipientId,
+            type,
+            title,
+            message,
+            relatedId
+        });
+    } catch (err) {
+        console.error('Notification error:', err);
+    }
+};
 
 exports.createQuotation = async (req, res) => {
     try {
@@ -13,6 +29,7 @@ exports.createQuotation = async (req, res) => {
         const quotationId = `QN${sequence.toString().padStart(5, '0')}`;
         let payload = { ...req.body };
         if (payload.clientRef === "") payload.clientRef = undefined;
+        if (payload.projectId === "") payload.projectId = undefined;
         if (payload.items) {
             payload.items = payload.items.map(i => {
                 if (i.productRef === "") i.productRef = undefined;
@@ -77,11 +94,26 @@ exports.requestDelete = async (req, res) => {
         const { reason } = req.body;
         if (!reason) return res.status(400).json({ success: false, message: 'Reason for deletion is required' });
 
+        const quotation = await Quotation.findById(req.params.id);
+        if (!quotation) return res.status(404).json({ success: false, message: 'Quotation not found' });
+
         const request = await QuotationDeleteRequest.create({
             quotation: req.params.id,
             requestedBy: req.user._id,
             reason
         });
+
+        const admins = await User.find({ role: { $in: ['admin', 'root'] } });
+        for (const admin of admins) {
+            await createNotification(
+                admin._id,
+                'delete_request',
+                'Deletion Request',
+                `${req.user.firstName} ${req.user.lastName} requested deletion of quotation ${quotation.quotationId}. Reason: ${reason}`,
+                request._id
+            );
+        }
+
         res.status(201).json({ success: true, message: 'Deletion request transmitted to Security.', data: request });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
@@ -102,18 +134,26 @@ exports.getDeleteRequests = async (req, res) => {
 
 exports.approveDeleteRequest = async (req, res) => {
     try {
-        const request = await QuotationDeleteRequest.findById(req.params.requestId);
+        const request = await QuotationDeleteRequest.findById(req.params.requestId).populate('requestedBy');
         if (!request || request.status !== 'Pending') {
             return res.status(404).json({ success: false, message: 'Pending request not isolated' });
         }
         
         // Execute the deletion
+        const quotation = await Quotation.findById(request.quotation);
         await Quotation.findByIdAndDelete(request.quotation);
         
         request.status = 'Approved';
         request.reviewedBy = req.user._id;
         request.reviewedAt = Date.now();
         await request.save();
+
+        await createNotification(
+            request.requestedBy._id,
+            'approval',
+            'Deletion Approved',
+            `Your deletion request for quotation ${quotation?.quotationId || 'N/A'} has been approved by ${req.user.firstName} ${req.user.lastName}.`
+        );
 
         res.status(200).json({ success: true, message: 'Quotation securely deleted per request.' });
     } catch (error) {
@@ -123,15 +163,24 @@ exports.approveDeleteRequest = async (req, res) => {
 
 exports.rejectDeleteRequest = async (req, res) => {
     try {
-        const request = await QuotationDeleteRequest.findById(req.params.requestId);
+        const request = await QuotationDeleteRequest.findById(req.params.requestId).populate('requestedBy');
         if (!request || request.status !== 'Pending') {
             return res.status(404).json({ success: false, message: 'Request not isolated' });
         }
+        
+        const quotation = await Quotation.findById(request.quotation);
         
         request.status = 'Rejected';
         request.reviewedBy = req.user._id;
         request.reviewedAt = Date.now();
         await request.save();
+
+        await createNotification(
+            request.requestedBy._id,
+            'rejection',
+            'Deletion Rejected',
+            `Your deletion request for quotation ${quotation?.quotationId || 'N/A'} has been rejected by ${req.user.firstName} ${req.user.lastName}.`
+        );
 
         res.status(200).json({ success: true, message: 'Quotation deletion averted.' });
     } catch (error) {

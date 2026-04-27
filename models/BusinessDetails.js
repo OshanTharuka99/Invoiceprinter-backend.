@@ -40,6 +40,24 @@ const businessDetailsSchema = new mongoose.Schema({
         type: String,
         trim: true
     },
+    //Bank Details
+    bankAccountNumber: {
+        type: String,
+        trim: true
+    },
+    bankAccountName: {
+        type: String,
+        trim: true
+    },
+    bankName: {
+        type: String,
+        trim: true
+    },
+    branchName: {
+        type: String,
+        trim: true
+    },
+    //Currency
     primaryCurrency: {
         code: { type: String, default: 'LKR' },
         symbol: { type: String, default: 'Rs.' }

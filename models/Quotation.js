@@ -1,5 +1,12 @@
 const mongoose = require('mongoose');
 
+const appliedDiscountSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    type: { type: String, enum: ['percentage', 'fixed'], required: true },
+    value: { type: Number, required: true },
+    amount: { type: Number, default: 0 }
+}, { _id: false });
+
 const quotationSchema = new mongoose.Schema({
     quotationId: {
         type: String,
@@ -18,10 +25,15 @@ const quotationSchema = new mongoose.Schema({
     },
     manualClientDetails: {
         title: { type: String, default: 'Mr' },
+        organization: { type: String, trim: true, default: '' },
         name: { type: String, trim: true },
         address: { type: String, trim: true },
         telephoneNumber: { type: String, trim: true },
         emailAddress: { type: String, trim: true }
+    },
+    projectId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Project'
     },
     items: [{
         productRef: {
@@ -34,13 +46,13 @@ const quotationSchema = new mongoose.Schema({
         lineTotal: { type: Number, required: true, min: 0 }
     }],
     subTotal: { type: Number, required: true, min: 0 },
-    hasDiscount: { type: Boolean, default: false },
-    discountType: { type: String, enum: ['percentage', 'fixed', 'none'], default: 'none' },
-    discountValue: { type: Number, default: 0 },
+    appliedDiscounts: [appliedDiscountSchema],
+    discountTotal: { type: Number, default: 0 },
     hasTax: { type: Boolean, default: false },
     taxName: { type: String, default: 'VAT' },
     taxPercentage: { type: Number, default: 0 },
     finalTotal: { type: Number, required: true, min: 0 },
+    validDate: { type: Date, default: null },
     currency: { type: String, default: 'primary' },
     status: {
         type: String,

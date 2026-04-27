@@ -1,7 +1,7 @@
 const Client = require('../models/Client');
 const ClientEditRequest = require('../models/ClientEditRequest');
 
-exports.createClient = async (req, res) => {
+exports.createClient = async (req, res, next) => {
     try {
         const latest = await Client.findOne().sort({ createdAt: -1 });
         let sequence = 1;
@@ -14,6 +14,7 @@ exports.createClient = async (req, res) => {
         const client = await Client.create({ ...req.body, clientId });
         res.status(201).json({ success: true, data: client });
     } catch (error) {
+        console.error('Client creation error:', error);
         res.status(400).json({ success: false, message: error.message });
     }
 };
