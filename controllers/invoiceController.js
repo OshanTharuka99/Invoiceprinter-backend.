@@ -17,96 +17,71 @@ const createNotification = async (recipientId, type, title, message, relatedId =
     }
 };
 
-exports.createInvoice = async (req, res) => {
-    try {
-        // Find latest invoice to determine the next INV ID sequence
-        const latest = await Invoice.findOne().sort({ createdAt: -1 });
-        let sequence = 1;
-        if (latest && latest.invoiceId && latest.invoiceId.startsWith('INV')) {
-            const num = parseInt(latest.invoiceId.substring(3), 10);
-            if (!isNaN(num)) sequence = num + 1;
-        }
-        const invoiceId = `INV${sequence.toString().padStart(5, '0')}`;
-        
-        let payload = { ...req.body };
-        if (payload.clientRef === "") payload.clientRef = undefined;
-        if (payload.projectId === "") payload.projectId = undefined;
-        if (payload.items) {
-            payload.items = payload.items.map(i => {
-                if (i.productRef === "") i.productRef = undefined;
-                return i;
-            });
-        }
-
-        const invoice = await Invoice.create({
-            ...payload,
-            invoiceId,
-            createdBy: req.user._id
-        });
-        
-        res.status(201).json({ success: true, data: invoice });
-    } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
-    }
-};
-
+// Get all invoices
 exports.getInvoices = async (req, res) => {
     try {
-        const invoices = await Invoice.find()
-            .populate('clientRef')
-            .populate('items.productRef')
-            .populate('createdBy', 'firstName lastName')
-            .sort({ createdAt: -1 });
-        res.status(200).json({ success: true, data: invoices });
+        const invoices = await Invoice.find().sort({ createdAt: -1 });
+        res.status(200).json(invoices);
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(500).json({ message: error.message });
     }
 };
 
+// Create new invoice
+exports.createInvoice = async (req, res) => {
+    const invoice = new Invoice(req.body);
+    try {
+        const newInvoice = await invoice.save();
+        res.status(201).json(newInvoice);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+};
+
+// Get single invoice
 exports.getInvoiceById = async (req, res) => {
     try {
-        const invoice = await Invoice.findById(req.params.id)
-            .populate('clientRef')
-            .populate('items.productRef')
-            .populate('createdBy', 'firstName lastName');
-        if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
-        res.status(200).json({ success: true, data: invoice });
+        const invoice = await Invoice.findById(req.params.id);
+        if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
+        res.status(200).json(invoice);
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(500).json({ message: error.message });
     }
 };
 
+// Update invoice
 exports.updateInvoice = async (req, res) => {
     try {
-        const invoice = await Invoice.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
-        if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
-        res.status(200).json({ success: true, data: invoice });
+        const updatedInvoice = await Invoice.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        res.status(200).json(updatedInvoice);
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ message: error.message });
     }
 };
 
+// Delete invoice
 exports.deleteInvoice = async (req, res) => {
     try {
         const invoice = await Invoice.findByIdAndDelete(req.params.id);
-        if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
+        if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
         
-        // Purge orphaned delete requests
+        // Purge orphaned delete requests linking to this invoice
         await InvoiceDeleteRequest.deleteMany({ invoice: req.params.id });
 
-        res.status(200).json({ success: true, message: 'Invoice eliminated.' });
+        res.status(200).json({ message: 'Invoice deleted successfully' });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(500).json({ message: error.message });
     }
 };
 
+// USER DELETION REQUEST
 exports.requestDelete = async (req, res) => {
     try {
         const { reason } = req.body;
-        if (!reason) return res.status(400).json({ success: false, message: 'Reason for deletion is required' });
+        if (!reason) return res.status(400).json({ message: 'Reason for deletion is required' });
 
         const invoice = await Invoice.findById(req.params.id);
-        if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
+        if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
 
         const request = await InvoiceDeleteRequest.create({
             invoice: req.params.id,
@@ -119,26 +94,27 @@ exports.requestDelete = async (req, res) => {
             await createNotification(
                 admin._id,
                 'delete_request',
-                'Invoice Deletion Request',
-                `${req.user.firstName} ${req.user.lastName} requested deletion of invoice ${invoice.invoiceId}. Reason: ${reason}`,
+                'Deletion Request',
+                `${req.user.firstName} ${req.user.lastName} requested deletion of invoice ${invoice._id}. Reason: ${reason}`,
                 request._id
             );
         }
 
-        res.status(201).json({ success: true, message: 'Deletion request transmitted to Security.', data: request });
+        res.status(201).json({ message: 'Deletion request transmitted to Security.', data: request });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ message: error.message });
     }
 };
 
+// VIEW PENDING DELETION REQUESTS (Admin Only)
 exports.getDeleteRequests = async (req, res) => {
     try {
         const requests = await InvoiceDeleteRequest.find({ status: 'Pending' })
             .populate('requestedBy', 'firstName lastName')
             .populate('invoice');
-        res.status(200).json({ success: true, data: requests });
+        res.status(200).json({ data: requests });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ message: error.message });
     }
 };
 
@@ -146,7 +122,7 @@ exports.approveDeleteRequest = async (req, res) => {
     try {
         const request = await InvoiceDeleteRequest.findById(req.params.requestId).populate('requestedBy');
         if (!request || request.status !== 'Pending') {
-            return res.status(404).json({ success: false, message: 'Pending request not isolated' });
+            return res.status(404).json({ message: 'Pending request not isolated' });
         }
         
         const invoice = await Invoice.findById(request.invoice);
@@ -160,13 +136,13 @@ exports.approveDeleteRequest = async (req, res) => {
         await createNotification(
             request.requestedBy._id,
             'approval',
-            'Invoice Deletion Approved',
-            `Your deletion request for invoice ${invoice?.invoiceId || 'N/A'} has been approved by ${req.user.firstName} ${req.user.lastName}.`
+            'Deletion Approved',
+            `Your deletion request for invoice ${invoice?._id || 'N/A'} has been approved by ${req.user.firstName} ${req.user.lastName}.`
         );
 
-        res.status(200).json({ success: true, message: 'Invoice securely deleted per request.' });
+        res.status(200).json({ message: 'Invoice securely deleted per request.' });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ message: error.message });
     }
 };
 
@@ -174,7 +150,7 @@ exports.rejectDeleteRequest = async (req, res) => {
     try {
         const request = await InvoiceDeleteRequest.findById(req.params.requestId).populate('requestedBy');
         if (!request || request.status !== 'Pending') {
-            return res.status(404).json({ success: false, message: 'Request not isolated' });
+            return res.status(404).json({ message: 'Request not isolated' });
         }
         
         const invoice = await Invoice.findById(request.invoice);
@@ -187,12 +163,12 @@ exports.rejectDeleteRequest = async (req, res) => {
         await createNotification(
             request.requestedBy._id,
             'rejection',
-            'Invoice Deletion Rejected',
-            `Your deletion request for invoice ${invoice?.invoiceId || 'N/A'} has been rejected by ${req.user.firstName} ${req.user.lastName}.`
+            'Deletion Rejected',
+            `Your deletion request for invoice ${invoice?._id || 'N/A'} has been rejected by ${req.user.firstName} ${req.user.lastName}.`
         );
 
-        res.status(200).json({ success: true, message: 'Invoice deletion averted.' });
+        res.status(200).json({ message: 'Invoice deletion averted.' });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ message: error.message });
     }
 };
