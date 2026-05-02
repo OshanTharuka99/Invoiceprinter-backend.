@@ -1,44 +1,92 @@
 const mongoose = require('mongoose');
 
+const appliedDiscountSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    type: { type: String, enum: ['percentage', 'fixed'], required: true },
+    value: { type: Number, required: true },
+    amount: { type: Number, default: 0 }
+}, { _id: false });
+
+const appliedTaxSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    type: { type: String, enum: ['percentage', 'fixed'], default: 'percentage' },
+    value: { type: Number, required: true },
+    amount: { type: Number, default: 0 }
+}, { _id: false });
+
 const invoiceSchema = new mongoose.Schema({
-    invoiceNumber: {
+    invoiceId: {
         type: String,
         required: true,
-        unique: true
+        unique: true,
+        uppercase: true
     },
-    customerName: {
+    creationMethod: {
         type: String,
+        enum: ['automatic', 'manual'],
         required: true
     },
-    customerEmail: String,
-    customerAddress: String,
+    clientRef: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Client'
+    },
+    manualClientDetails: {
+        title: { type: String, default: 'Mr' },
+        organization: { type: String, trim: true, default: '' },
+        name: { type: String, trim: true },
+        address: { type: String, trim: true },
+        telephoneNumber: { type: String, trim: true },
+        emailAddress: { type: String, trim: true }
+    },
+    projectId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Project'
+    },
+    paymentMethod: {
+        type: String,
+        enum: ['cash', 'cheque', 'bank_transfer', 'credit'],
+        required: true
+    },
+    creditPeriod: {
+        duration: { type: Number, default: 0 },
+        unit: { type: String, enum: ['days', 'weeks', 'months'], default: 'days' }
+    },
+    deliveryAddress: {
+        type: String,
+        trim: true,
+        default: ''
+    },
     items: [{
-        description: { type: String, required: true },
-        quantity: { type: Number, required: true },
-        price: { type: Number, required: true },
-        total: { type: Number, required: true }
+        productRef: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Product'
+        },
+        manualName: { type: String, trim: true },
+        quantity: { type: Number, required: true, min: 0 },
+        unitPrice: { type: Number, required: true, min: 0 },
+        lineTotal: { type: Number, required: true, min: 0 },
+        serialNumbers: [{ type: String, trim: true }]
     }],
-    subTotal: {
-        type: Number,
-        required: true
-    },
-    tax: {
-        type: Number,
-        default: 0
-    },
-    totalAmount: {
-        type: Number,
-        required: true
-    },
+    subTotal: { type: Number, required: true, min: 0 },
+    appliedDiscounts: [appliedDiscountSchema],
+    discountTotal: { type: Number, default: 0 },
+    hasTax: { type: Boolean, default: false },
+    appliedTaxes: [appliedTaxSchema],
+    taxTotal: { type: Number, default: 0 },
+    finalTotal: { type: Number, required: true, min: 0 },
+    currency: { type: String, default: 'primary' },
     status: {
         type: String,
         enum: ['Paid', 'Unpaid', 'Pending'],
         default: 'Unpaid'
     },
-    date: {
-        type: Date,
-        default: Date.now
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
     }
-}, { timestamps: true });
+}, {
+    timestamps: true
+});
 
 module.exports = mongoose.model('Invoice', invoiceSchema);

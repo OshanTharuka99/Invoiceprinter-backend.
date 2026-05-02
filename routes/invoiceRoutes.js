@@ -15,6 +15,9 @@ router.route('/delete-requests/:requestId/approve')
 router.route('/delete-requests/:requestId/reject')
     .put(restrictTo('admin', 'root'), invoiceController.rejectDeleteRequest);
 
+router.route('/stats')
+    .get(restrictTo('admin', 'root'), invoiceController.getInvoiceStats);
+
 // Standard General Routes
 router.route('/')
     .get(invoiceController.getInvoices)

@@ -41,6 +41,11 @@ const quotationSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Project'
     },
+    deliveryAddress: {
+        type: String,
+        trim: true,
+        default: ''
+    },
     items: [{
         productRef: {
             type: mongoose.Schema.Types.ObjectId,
