@@ -12,7 +12,7 @@ exports.getWarranties = async (req, res) => {
 
         const now = new Date();
         const warranties = await Warranty.find(query)
-            .populate('invoiceRef', 'invoiceId')
+            .populate('invoiceRef', 'invoiceNumber manualClientDetails')
             .populate('clientRef', 'firstName lastName clientId')
             .populate('projectRef', 'projectId name')
             .populate('productRef', 'name productId warrantyPeriod')
@@ -46,7 +46,7 @@ exports.getWarranties = async (req, res) => {
 exports.getWarrantyById = async (req, res) => {
     try {
         const warranty = await Warranty.findById(req.params.id)
-            .populate('invoiceRef', 'invoiceId')
+            .populate('invoiceRef', 'invoiceNumber manualClientDetails')
             .populate('clientRef', 'firstName lastName clientId')
             .populate('projectRef', 'projectId name')
             .populate('productRef', 'name productId warrantyPeriod');
@@ -68,7 +68,7 @@ exports.updateWarrantyStatus = async (req, res) => {
             req.params.id,
             { status },
             { new: true }
-        ).populate('invoiceRef', 'invoiceId')
+        ).populate('invoiceRef', 'invoiceNumber manualClientDetails')
             .populate('clientRef', 'firstName lastName clientId')
             .populate('projectRef', 'projectId name')
             .populate('productRef', 'name productId warrantyPeriod');

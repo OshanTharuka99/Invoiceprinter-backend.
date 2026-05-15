@@ -9,7 +9,7 @@ const warrantySchema = new mongoose.Schema({
     clientRef: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Client',
-        required: true
+        required: false
     },
     projectRef: {
         type: mongoose.Schema.Types.ObjectId,
@@ -38,7 +38,7 @@ const warrantySchema = new mongoose.Schema({
     },
     expiryDate: {
         type: Date,
-        required: true
+        required: false
     },
     status: {
         type: String,

@@ -15,11 +15,15 @@ const appliedTaxSchema = new mongoose.Schema({
 }, { _id: false });
 
 const invoiceSchema = new mongoose.Schema({
-    invoiceId: {
+    invoiceNumber: {
         type: String,
         required: true,
         unique: true,
         uppercase: true
+    },
+    invoiceDate: {
+        type: Date,
+        default: Date.now
     },
     creationMethod: {
         type: String,

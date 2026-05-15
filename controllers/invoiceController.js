@@ -88,7 +88,8 @@ exports.createInvoice = async (req, res) => {
             taxTotal,
             finalTotal,
             currency,
-            status
+            status,
+            invoiceDate
         } = req.body;
 
         if (!items || items.length === 0) {
@@ -97,16 +98,16 @@ exports.createInvoice = async (req, res) => {
 
         const latestInvoice = await Invoice.findOne().sort({ createdAt: -1 });
         let sequence = 1;
-        if (latestInvoice && latestInvoice.invoiceId) {
-            const match = latestInvoice.invoiceId.match(/INV(\d+)/);
+        if (latestInvoice && latestInvoice.invoiceNumber) {
+            const match = latestInvoice.invoiceNumber.match(/INV(\d+)/);
             if (match) {
                 sequence = parseInt(match[1], 10) + 1;
             }
         }
-        const invoiceId = `INV${sequence.toString().padStart(5, '0')}`;
+        const invoiceNumber = `INV${sequence.toString().padStart(5, '0')}`;
 
         const invoiceData = {
-            invoiceId,
+            invoiceNumber,
             creationMethod,
             clientRef: clientRef || undefined,
             manualClientDetails: manualClientDetails || {},
@@ -124,6 +125,7 @@ exports.createInvoice = async (req, res) => {
             finalTotal,
             currency: currency || 'primary',
             status: status || 'Unpaid',
+            invoiceDate: invoiceDate || Date.now(),
             createdBy: req.user._id
         };
 
@@ -170,7 +172,7 @@ exports.createInvoice = async (req, res) => {
         }
 
         const warrantyRecords = [];
-        const startDate = new Date();
+        const startDate = invoiceDate ? new Date(invoiceDate) : new Date();
 
         for (const item of items) {
             if (item.serialNumbers && item.serialNumbers.length > 0 && item.productRef) {
@@ -178,23 +180,21 @@ exports.createInvoice = async (req, res) => {
                 const warrantyPeriod = product?.warrantyPeriod || '';
                 const expiryDate = calculateWarrantyExpiry(startDate, warrantyPeriod);
 
-                if (expiryDate) {
-                    for (const serial of item.serialNumbers) {
-                        try {
-                            const warranty = await Warranty.create({
-                                invoiceRef: invoice._id,
-                                clientRef: clientRef,
-                                projectRef: projectId || undefined,
-                                productRef: item.productRef,
-                                serialNumber: serial.toUpperCase(),
-                                warrantyPeriod,
-                                startDate,
-                                expiryDate
-                            });
-                            warrantyRecords.push(warranty);
-                        } catch (err) {
-                            console.error(`Warranty creation failed for serial ${serial}:`, err.message);
-                        }
+                for (const serial of item.serialNumbers) {
+                    try {
+                        const warranty = await Warranty.create({
+                            invoiceRef: invoice._id,
+                            clientRef: clientRef || null,
+                            projectRef: projectId || null,
+                            productRef: item.productRef,
+                            serialNumber: serial.toUpperCase(),
+                            warrantyPeriod,
+                            startDate,
+                            expiryDate
+                        });
+                        warrantyRecords.push(warranty);
+                    } catch (err) {
+                        console.error(`Warranty creation failed for serial ${serial}:`, err.message);
                     }
                 }
             }
@@ -312,7 +312,7 @@ exports.requestDelete = async (req, res) => {
                 admin._id,
                 'delete_request',
                 'Deletion Request',
-                `${req.user.firstName} ${req.user.lastName} requested deletion of invoice ${invoice.invoiceId}. Reason: ${reason}`,
+                `${req.user.firstName} ${req.user.lastName} requested deletion of invoice ${invoice.invoiceNumber}. Reason: ${reason}`,
                 request._id
             );
         }
@@ -354,7 +354,7 @@ exports.approveDeleteRequest = async (req, res) => {
             request.requestedBy._id,
             'approval',
             'Deletion Approved',
-            `Your deletion request for invoice ${invoice?.invoiceId || 'N/A'} has been approved by ${req.user.firstName} ${req.user.lastName}.`
+            `Your deletion request for invoice ${invoice?.invoiceNumber || 'N/A'} has been approved by ${req.user.firstName} ${req.user.lastName}.`
         );
 
         res.status(200).json({ success: true, message: 'Invoice securely deleted per request.' });
@@ -381,7 +381,7 @@ exports.rejectDeleteRequest = async (req, res) => {
             request.requestedBy._id,
             'rejection',
             'Deletion Rejected',
-            `Your deletion request for invoice ${invoice?.invoiceId || 'N/A'} has been rejected by ${req.user.firstName} ${req.user.lastName}.`
+            `Your deletion request for invoice ${invoice?.invoiceNumber || 'N/A'} has been rejected by ${req.user.firstName} ${req.user.lastName}.`
         );
 
         res.status(200).json({ success: true, message: 'Invoice deletion averted.' });
