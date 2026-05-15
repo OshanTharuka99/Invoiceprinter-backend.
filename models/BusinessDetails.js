@@ -120,6 +120,16 @@ const businessDetailsSchema = new mongoose.Schema({
         type: String,
         trim: true,
         default: ''
+    },
+    invoiceTerms: {
+        type: String,
+        trim: true,
+        default: 'Standard invoice terms and conditions apply.'
+    },
+    invoiceNotes: {
+        type: String,
+        trim: true,
+        default: ''
     }
 }, {
     timestamps: true
