@@ -259,20 +259,60 @@ exports.deleteInvoice = async (req, res) => {
 
 exports.getInvoiceStats = async (req, res) => {
     try {
-        const totalInvoices = await Invoice.countDocuments();
+        const { period } = req.query;
+        const now = new Date();
+        let start, end, dateFormat;
+
+        switch (period) {
+            case 'daily':
+                start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+                dateFormat = '%Y-%m-%d';
+                break;
+            case 'monthly':
+                start = new Date(now.getFullYear(), now.getMonth(), 1);
+                end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+                dateFormat = '%Y-%m-%d';
+                break;
+            default:
+                start = new Date(now.getFullYear(), 0, 1);
+                end = new Date(now.getFullYear() + 1, 0, 1);
+                dateFormat = '%Y-%m';
+                break;
+        }
+
+        const dateMatch = { createdAt: { $gte: start, $lt: end } };
+
+        const totalInvoices = await Invoice.countDocuments(dateMatch);
+
         const totalSales = await Invoice.aggregate([
+            { $match: dateMatch },
             { $group: { _id: null, total: { $sum: '$finalTotal' } } }
         ]);
 
         const paymentMethodBreakdown = await Invoice.aggregate([
+            { $match: dateMatch },
             { $group: { _id: '$paymentMethod', count: { $sum: 1 }, total: { $sum: '$finalTotal' } } }
         ]);
 
         const statusBreakdown = await Invoice.aggregate([
+            { $match: dateMatch },
             { $group: { _id: '$status', count: { $sum: 1 }, total: { $sum: '$finalTotal' } } }
         ]);
 
-        const recentInvoices = await Invoice.find()
+        const salesOverTime = await Invoice.aggregate([
+            { $match: dateMatch },
+            {
+                $group: {
+                    _id: { $dateToString: { format: dateFormat, date: '$createdAt' } },
+                    total: { $sum: '$finalTotal' },
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+
+        const recentInvoices = await Invoice.find(dateMatch)
             .populate('clientRef', 'firstName lastName')
             .sort({ createdAt: -1 })
             .limit(10);
@@ -280,10 +320,13 @@ exports.getInvoiceStats = async (req, res) => {
         res.status(200).json({
             success: true,
             data: {
+                period: period || 'yearly',
+                dateRange: { start, end },
                 totalInvoices,
                 totalSales: totalSales[0]?.total || 0,
                 paymentMethodBreakdown,
                 statusBreakdown,
+                salesOverTime,
                 recentInvoices
             }
         });
