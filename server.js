@@ -24,6 +24,7 @@ const supplierRoutes = require('./routes/supplierRoutes');
 const quotationRoutes = require('./routes/quotationRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const warrantyRoutes = require('./routes/warrantyRoutes');
+const purchaseOrderRoutes = require('./routes/purchaseOrderRoutes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -36,6 +37,7 @@ app.use('/api/suppliers', supplierRoutes);
 app.use('/api/quotations', quotationRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/warranties', warrantyRoutes);
+app.use('/api/purchase-orders', purchaseOrderRoutes);
 
 app.get('/', (req, res) => {
     res.send('Invoice Printer API is running...');

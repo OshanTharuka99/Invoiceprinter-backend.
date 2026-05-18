@@ -130,7 +130,22 @@ const businessDetailsSchema = new mongoose.Schema({
         type: String,
         trim: true,
         default: ''
-    }
+    },
+    purchaseOrderTerms: {
+        type: String,
+        trim: true,
+        default: 'Standard purchase order terms and conditions apply.'
+    },
+    purchaseOrderNotes: {
+        type: String,
+        trim: true,
+        default: ''
+    },
+    stores: [{
+        name: { type: String, trim: true },
+        address: { type: String, trim: true },
+        phoneNumber: { type: String, trim: true }
+    }]
 }, {
     timestamps: true
 });

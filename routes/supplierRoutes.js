@@ -4,14 +4,13 @@ const supplierController = require('../controllers/supplierController');
 const { protect, restrictTo } = require('../middleware/auth');
 
 router.use(protect);
-router.use(restrictTo('admin', 'root')); // fully restricted
 
 router.route('/')
     .get(supplierController.getSuppliers)
     .post(supplierController.createSupplier);
 
 router.route('/:id')
-    .put(supplierController.updateSupplier)
-    .delete(supplierController.deleteSupplier);
+    .put(restrictTo('admin', 'root'), supplierController.updateSupplier)
+    .delete(restrictTo('admin', 'root'), supplierController.deleteSupplier);
 
 module.exports = router;
