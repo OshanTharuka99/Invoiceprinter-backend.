@@ -167,6 +167,7 @@ exports.getInvoices = async (req, res) => {
             .populate('clientRef')
             .populate('projectId')
             .populate('createdBy', 'firstName lastName')
+            .populate('statusHistory.editedBy', 'firstName lastName')
             .populate('items.productRef', 'name productId warrantyPeriod')
             .sort({ createdAt: -1 });
         res.status(200).json({ success: true, data: invoices });
@@ -300,6 +301,7 @@ exports.createInvoice = async (req, res) => {
             .populate('clientRef')
             .populate('projectId')
             .populate('createdBy', 'firstName lastName')
+            .populate('statusHistory.editedBy', 'firstName lastName')
             .populate('items.productRef', 'name productId warrantyPeriod');
 
         res.status(201).json({
@@ -318,6 +320,7 @@ exports.getInvoiceById = async (req, res) => {
             .populate('clientRef')
             .populate('projectId')
             .populate('createdBy', 'firstName lastName')
+            .populate('statusHistory.editedBy', 'firstName lastName')
             .populate('items.productRef', 'name productId warrantyPeriod');
         if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
         res.status(200).json({ success: true, data: invoice });
@@ -331,6 +334,7 @@ exports.updateInvoice = async (req, res) => {
         const updatedInvoice = await Invoice.findByIdAndUpdate(req.params.id, req.body, { new: true })
             .populate('clientRef')
             .populate('projectId')
+            .populate('statusHistory.editedBy', 'firstName lastName')
             .populate('items.productRef', 'name productId warrantyPeriod');
         if (!updatedInvoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
         res.status(200).json({ success: true, data: updatedInvoice });
@@ -450,6 +454,13 @@ exports.editInvoice = async (req, res) => {
 
         const initialStatus = paymentMethod === 'cash' ? 'Paid' : (status || 'Unpaid');
 
+        const newHistory = [...originalInvoice.statusHistory, {
+            status: initialStatus,
+            note: `Created as edit of ${originalInvoice.invoiceNumber}`,
+            editedBy: req.user._id,
+            editedAt: Date.now()
+        }];
+
         // 6. Create the new invoice
         const newInvoice = await Invoice.create({
             invoiceNumber: newInvoiceNumber,
@@ -470,12 +481,7 @@ exports.editInvoice = async (req, res) => {
             finalTotal,
             currency: currency || 'primary',
             status: initialStatus,
-            statusHistory: [{
-                status: initialStatus,
-                note: `Created as edit of ${originalInvoice.invoiceNumber}`,
-                editedBy: req.user._id,
-                editedAt: Date.now()
-            }],
+            statusHistory: newHistory,
             originalInvoiceRef: originalInvoice._id,
             invoiceDate: invoiceDate || Date.now(),
             createdBy: req.user._id
@@ -526,6 +532,7 @@ exports.editInvoice = async (req, res) => {
             .populate('clientRef')
             .populate('projectId')
             .populate('createdBy', 'firstName lastName')
+            .populate('statusHistory.editedBy', 'firstName lastName')
             .populate('items.productRef', 'name productId warrantyPeriod');
 
         res.status(201).json({
@@ -553,9 +560,20 @@ exports.deleteInvoice = async (req, res) => {
             await reverseInvoiceStock(invoice);
         }
 
-        await Invoice.findByIdAndDelete(req.params.id);
+        // Delete related warranties
+        await Warranty.deleteMany({ invoiceRef: invoice._id });
+
+        // Soft delete the invoice by setting status to Cancelled
+        invoice.status = 'Cancelled';
+        invoice.statusHistory.push({
+            status: 'Cancelled',
+            note: 'Invoice deleted/nullified',
+            editedBy: req.user._id,
+            editedAt: Date.now()
+        });
+        await invoice.save();
+
         await InvoiceDeleteRequest.deleteMany({ invoice: req.params.id });
-        await Warranty.deleteMany({ invoiceRef: req.params.id });
 
         res.status(200).json({ success: true, message: 'Invoice deleted and stock restored successfully' });
     } catch (error) {
@@ -695,8 +713,25 @@ exports.approveDeleteRequest = async (req, res) => {
         }
 
         const invoice = await Invoice.findById(request.invoice);
-        await Invoice.findByIdAndDelete(request.invoice);
-        await Warranty.deleteMany({ invoiceRef: request.invoice });
+        if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
+
+        // Restore stock before soft-deleting
+        if (invoice.status !== 'Cancelled') {
+            await reverseInvoiceStock(invoice);
+        }
+
+        // Delete related warranties
+        await Warranty.deleteMany({ invoiceRef: invoice._id });
+
+        // Soft delete the invoice by setting status to Cancelled
+        invoice.status = 'Cancelled';
+        invoice.statusHistory.push({
+            status: 'Cancelled',
+            note: `Invoice deleted via approved request. Reason: ${request.reason}`,
+            editedBy: req.user._id,
+            editedAt: Date.now()
+        });
+        await invoice.save();
 
         request.status = 'Approved';
         request.reviewedBy = req.user._id;
