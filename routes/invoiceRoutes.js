@@ -28,6 +28,12 @@ router.route('/:id')
     .patch(invoiceController.updateInvoice)
     .delete(restrictTo('admin', 'root'), invoiceController.deleteInvoice);
 
+router.route('/:id/status')
+    .patch(invoiceController.updateInvoiceStatus);
+
+router.route('/:id/edit')
+    .put(restrictTo('root'), invoiceController.editInvoice);
+
 router.route('/:id/request-delete')
     .post(invoiceController.requestDelete);
 

@@ -21,6 +21,112 @@ const createNotification = async (recipientId, type, title, message, relatedId =
     }
 };
 
+const EDIT_DELETE_WINDOW_DAYS = 30;
+
+const isWithinEditWindow = (createdAt) => {
+    const now = new Date();
+    const diffMs = now - new Date(createdAt);
+    const diffDays = diffMs / (1000 * 60 * 60 * 24);
+    return diffDays <= EDIT_DELETE_WINDOW_DAYS;
+};
+
+// Restore stock from an invoice's items (used on edit/delete)
+const reverseInvoiceStock = async (invoice) => {
+    for (const item of invoice.items) {
+        if (!item.productRef) continue;
+        const hasSerials = item.serialNumbers && item.serialNumbers.length > 0;
+        const isAutomatic = invoice.creationMethod === 'automatic';
+        const isManual = invoice.creationMethod === 'manual';
+
+        // Find the most recent stock entry for this product to restore into
+        let entry = await StockEntry.findOne({ product: item.productRef }).sort({ createdAt: -1 });
+
+        if (hasSerials) {
+            // Restore serial numbers back to the stock entry
+            if (entry) {
+                const upperSerials = item.serialNumbers.map(s => s.toUpperCase());
+                const newSerials = [...new Set([...entry.serialNumbers, ...upperSerials])];
+                entry.serialNumbers = newSerials;
+                if (isManual) {
+                    entry.quantity += item.serialNumbers.length;
+                }
+                await entry.save();
+            }
+        }
+
+        if (isAutomatic) {
+            // Restore quantity to product level
+            await Product.findByIdAndUpdate(item.productRef, {
+                $inc: { quantity: item.quantity }
+            });
+            // Also try to restore to the stock entry
+            if (entry) {
+                entry.quantity += item.quantity;
+                await entry.save();
+            }
+        } else if (isManual && hasSerials) {
+            await Product.findByIdAndUpdate(item.productRef, {
+                $inc: { quantity: item.serialNumbers.length }
+            });
+        }
+    }
+};
+
+// Apply stock deductions for a set of items (used on create/edit)
+const applyStockDeductions = async (items, creationMethod) => {
+    for (const item of items) {
+        if (item.productRef && (creationMethod === 'automatic' || (creationMethod === 'manual' && item.serialNumbers?.length > 0))) {
+            let remainingQty = item.quantity;
+
+            const stockEntries = await StockEntry.find({
+                product: item.productRef,
+                quantity: { $gt: 0 }
+            }).sort({ createdAt: 1 });
+
+            for (const entry of stockEntries) {
+                if (remainingQty <= 0) break;
+
+                if (item.serialNumbers && item.serialNumbers.length > 0) {
+                    const serialsToRemove = item.serialNumbers.filter(sn =>
+                        entry.serialNumbers.map(s => s.toUpperCase()).includes(sn.toUpperCase())
+                    );
+                    if (serialsToRemove.length > 0) {
+                        entry.serialNumbers = entry.serialNumbers.filter(
+                            sn => !serialsToRemove.map(s => s.toUpperCase()).includes(sn.toUpperCase())
+                        );
+                        if (creationMethod === 'manual') {
+                            entry.quantity = Math.max(0, entry.quantity - serialsToRemove.length);
+                            remainingQty -= serialsToRemove.length;
+                        }
+                    }
+                }
+
+                if (creationMethod === 'automatic') {
+                    const reduceQty = Math.min(remainingQty, entry.quantity);
+                    entry.quantity -= reduceQty;
+                    remainingQty -= reduceQty;
+                }
+
+                if (entry.quantity <= 0) {
+                    await StockEntry.findByIdAndDelete(entry._id);
+                } else {
+                    await entry.save();
+                }
+            }
+
+            if (creationMethod === 'automatic') {
+                await Product.findByIdAndUpdate(item.productRef, {
+                    $inc: { quantity: -item.quantity }
+                });
+            } else if (creationMethod === 'manual' && item.serialNumbers?.length > 0) {
+                await Product.findByIdAndUpdate(item.productRef, {
+                    $inc: { quantity: -item.serialNumbers.length }
+                });
+            }
+        }
+    }
+};
+
 const calculateWarrantyExpiry = (startDate, warrantyPeriod) => {
     if (!warrantyPeriod || warrantyPeriod.trim() === '') {
         return null;
@@ -111,6 +217,9 @@ exports.createInvoice = async (req, res) => {
         }
         const invoiceNumber = `INV${sequence.toString().padStart(5, '0')}`;
 
+        // Enforce Paid status for Cash payment method
+        const initialStatus = paymentMethod === 'cash' ? 'Paid' : (status || 'Unpaid');
+
         const invoiceData = {
             invoiceNumber,
             creationMethod,
@@ -129,63 +238,20 @@ exports.createInvoice = async (req, res) => {
             taxTotal: taxTotal || 0,
             finalTotal,
             currency: currency || 'primary',
-            status: status || 'Unpaid',
+            status: initialStatus,
+            statusHistory: [{
+                status: initialStatus,
+                note: 'Initial invoice creation',
+                editedBy: req.user._id,
+                editedAt: Date.now()
+            }],
             invoiceDate: invoiceDate || Date.now(),
             createdBy: req.user._id
         };
 
         const invoice = await Invoice.create(invoiceData);
 
-        for (const item of items) {
-            if (item.productRef && (creationMethod === 'automatic' || (creationMethod === 'manual' && item.serialNumbers?.length > 0))) {
-                let remainingQty = item.quantity;
-
-                const stockEntries = await StockEntry.find({
-                    product: item.productRef,
-                    quantity: { $gt: 0 }
-                }).sort({ createdAt: 1 });
-
-                for (const entry of stockEntries) {
-                    if (remainingQty <= 0) break;
-
-                    // For automatic mode — reduce quantity
-                    if (creationMethod === 'automatic') {
-                        const reduceQty = Math.min(remainingQty, entry.quantity);
-                        entry.quantity -= reduceQty;
-                        remainingQty -= reduceQty;
-                    }
-
-                    // Deduct matched serial numbers from stock entry (both modes)
-                    if (item.serialNumbers && item.serialNumbers.length > 0) {
-                        const serialsToRemove = item.serialNumbers.filter(sn =>
-                            entry.serialNumbers.includes(sn.toUpperCase())
-                        );
-                        if (serialsToRemove.length > 0) {
-                            entry.serialNumbers = entry.serialNumbers.filter(
-                                sn => !serialsToRemove.map(s => s.toUpperCase()).includes(sn.toUpperCase())
-                            );
-                            // In manual mode, reduce qty by the number of serials removed from this entry
-                            if (creationMethod === 'manual') {
-                                entry.quantity = Math.max(0, entry.quantity - serialsToRemove.length);
-                            }
-                        }
-                    }
-
-                    await entry.save();
-                }
-
-                if (creationMethod === 'automatic') {
-                    await Product.findByIdAndUpdate(item.productRef, {
-                        $inc: { quantity: -item.quantity }
-                    });
-                } else if (creationMethod === 'manual' && item.serialNumbers?.length > 0) {
-                    // Reduce product stock count by the number of serials consumed
-                    await Product.findByIdAndUpdate(item.productRef, {
-                        $inc: { quantity: -item.serialNumbers.length }
-                    });
-                }
-            }
-        }
+        await applyStockDeductions(items, creationMethod);
 
         if (projectId) {
             await Project.findByIdAndUpdate(projectId, {
@@ -273,15 +339,225 @@ exports.updateInvoice = async (req, res) => {
     }
 };
 
-exports.deleteInvoice = async (req, res) => {
+exports.updateInvoiceStatus = async (req, res) => {
     try {
-        const invoice = await Invoice.findByIdAndDelete(req.params.id);
+        const { status, note } = req.body;
+        if (!status) return res.status(400).json({ success: false, message: 'Status is required' });
+
+        const invoice = await Invoice.findById(req.params.id);
         if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
 
+        if (invoice.paymentMethod === 'cash') {
+            return res.status(400).json({ success: false, message: 'Cash invoices are permanently marked as Paid' });
+        }
+
+        invoice.status = status;
+        invoice.statusHistory.push({
+            status,
+            note: note || '',
+            editedBy: req.user._id,
+            editedAt: Date.now()
+        });
+
+        await invoice.save();
+
+        const updatedInvoice = await Invoice.findById(invoice._id)
+            .populate('clientRef')
+            .populate('projectId')
+            .populate('createdBy', 'firstName lastName')
+            .populate('statusHistory.editedBy', 'firstName lastName')
+            .populate('items.productRef', 'name productId warrantyPeriod');
+
+        res.status(200).json({ success: true, data: updatedInvoice });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+exports.editInvoice = async (req, res) => {
+    try {
+        const originalInvoice = await Invoice.findById(req.params.id);
+        if (!originalInvoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
+
+        if (originalInvoice.status === 'Cancelled') {
+            return res.status(400).json({ success: false, message: 'Cannot edit a cancelled invoice' });
+        }
+
+        if (!isWithinEditWindow(originalInvoice.createdAt)) {
+            return res.status(403).json({ success: false, message: 'Invoice can only be edited within 30 days of creation' });
+        }
+
+        const {
+            creationMethod,
+            clientRef,
+            manualClientDetails,
+            projectId,
+            paymentMethod,
+            creditPeriod,
+            deliveryAddress,
+            items,
+            subTotal,
+            appliedDiscounts,
+            discountTotal,
+            hasTax,
+            appliedTaxes,
+            taxTotal,
+            finalTotal,
+            currency,
+            status,
+            invoiceDate,
+            editNote
+        } = req.body;
+
+        if (!items || items.length === 0) {
+            return res.status(400).json({ success: false, message: 'At least one item is required' });
+        }
+        if (!projectId) {
+            return res.status(400).json({ success: false, message: 'A project must be selected' });
+        }
+
+        // 1. Reverse stock effects of the original invoice
+        await reverseInvoiceStock(originalInvoice);
+
+        // 2. Delete old warranty records linked to original invoice
+        await Warranty.deleteMany({ invoiceRef: originalInvoice._id });
+
+        // 3. Reverse project value contribution
+        await Project.findByIdAndUpdate(originalInvoice.projectId, {
+            $inc: { value: -originalInvoice.finalTotal }
+        });
+
+        // 4. Cancel the original invoice
+        originalInvoice.status = 'Cancelled';
+        originalInvoice.cancelledBy = req.user._id;
+        originalInvoice.cancellationNote = editNote || `Replaced by edited invoice`;
+        originalInvoice.statusHistory.push({
+            status: 'Cancelled',
+            note: editNote || 'Invoice superseded by edit',
+            editedBy: req.user._id,
+            editedAt: Date.now()
+        });
+        await originalInvoice.save();
+
+        // 5. Generate new invoice number
+        const latestInvoice = await Invoice.findOne().sort({ createdAt: -1 });
+        let sequence = 1;
+        if (latestInvoice && latestInvoice.invoiceNumber) {
+            const match = latestInvoice.invoiceNumber.match(/INV(\d+)/);
+            if (match) sequence = parseInt(match[1], 10) + 1;
+        }
+        const newInvoiceNumber = `INV${sequence.toString().padStart(5, '0')}`;
+
+        const initialStatus = paymentMethod === 'cash' ? 'Paid' : (status || 'Unpaid');
+
+        // 6. Create the new invoice
+        const newInvoice = await Invoice.create({
+            invoiceNumber: newInvoiceNumber,
+            creationMethod: creationMethod || originalInvoice.creationMethod,
+            clientRef: clientRef || undefined,
+            manualClientDetails: manualClientDetails || {},
+            projectId: projectId || undefined,
+            paymentMethod,
+            creditPeriod: creditPeriod || { duration: 0, unit: 'days' },
+            deliveryAddress: deliveryAddress || '',
+            items,
+            subTotal,
+            appliedDiscounts: appliedDiscounts || [],
+            discountTotal: discountTotal || 0,
+            hasTax: hasTax || false,
+            appliedTaxes: appliedTaxes || [],
+            taxTotal: taxTotal || 0,
+            finalTotal,
+            currency: currency || 'primary',
+            status: initialStatus,
+            statusHistory: [{
+                status: initialStatus,
+                note: `Created as edit of ${originalInvoice.invoiceNumber}`,
+                editedBy: req.user._id,
+                editedAt: Date.now()
+            }],
+            originalInvoiceRef: originalInvoice._id,
+            invoiceDate: invoiceDate || Date.now(),
+            createdBy: req.user._id
+        });
+
+        // 7. Apply new stock deductions
+        await applyStockDeductions(items, creationMethod || originalInvoice.creationMethod);
+
+        // 8. Update project value
+        if (projectId) {
+            await Project.findByIdAndUpdate(projectId, { $inc: { value: finalTotal } });
+        }
+
+        // 9. Create new warranty records
+        const startDate = invoiceDate ? new Date(invoiceDate) : new Date();
+        let projectLocation = '';
+        if (projectId) {
+            const proj = await Project.findById(projectId).select('location');
+            projectLocation = proj?.location || '';
+        }
+
+        for (const item of items) {
+            if (item.serialNumbers && item.serialNumbers.length > 0 && item.productRef) {
+                const product = await Product.findById(item.productRef);
+                const warrantyPeriod = product?.warrantyPeriod || '';
+                const expiryDate = calculateWarrantyExpiry(startDate, warrantyPeriod);
+                for (const serial of item.serialNumbers) {
+                    try {
+                        await Warranty.create({
+                            invoiceRef: newInvoice._id,
+                            clientRef: clientRef || null,
+                            projectRef: projectId || null,
+                            projectLocation,
+                            productRef: item.productRef,
+                            serialNumber: serial.toUpperCase(),
+                            warrantyPeriod,
+                            startDate,
+                            expiryDate
+                        });
+                    } catch (err) {
+                        console.error(`Warranty creation failed for serial ${serial}:`, err.message);
+                    }
+                }
+            }
+        }
+
+        const populatedInvoice = await Invoice.findById(newInvoice._id)
+            .populate('clientRef')
+            .populate('projectId')
+            .populate('createdBy', 'firstName lastName')
+            .populate('items.productRef', 'name productId warrantyPeriod');
+
+        res.status(201).json({
+            success: true,
+            data: populatedInvoice,
+            cancelledInvoiceNumber: originalInvoice.invoiceNumber
+        });
+    } catch (error) {
+        console.error('editInvoice error:', error);
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+exports.deleteInvoice = async (req, res) => {
+    try {
+        const invoice = await Invoice.findById(req.params.id);
+        if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
+
+        if (!isWithinEditWindow(invoice.createdAt)) {
+            return res.status(403).json({ success: false, message: 'Invoice can only be deleted within 30 days of creation' });
+        }
+
+        // Restore stock before deleting
+        if (invoice.status !== 'Cancelled') {
+            await reverseInvoiceStock(invoice);
+        }
+
+        await Invoice.findByIdAndDelete(req.params.id);
         await InvoiceDeleteRequest.deleteMany({ invoice: req.params.id });
         await Warranty.deleteMany({ invoiceRef: req.params.id });
 
-        res.status(200).json({ success: true, message: 'Invoice deleted successfully' });
+        res.status(200).json({ success: true, message: 'Invoice deleted and stock restored successfully' });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
@@ -372,6 +648,10 @@ exports.requestDelete = async (req, res) => {
 
         const invoice = await Invoice.findById(req.params.id);
         if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
+
+        if (!isWithinEditWindow(invoice.createdAt)) {
+            return res.status(403).json({ success: false, message: 'Delete requests can only be raised within 30 days of invoice creation' });
+        }
 
         const request = await InvoiceDeleteRequest.create({
             invoice: req.params.id,

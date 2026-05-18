@@ -81,8 +81,30 @@ const invoiceSchema = new mongoose.Schema({
     currency: { type: String, default: 'primary' },
     status: {
         type: String,
-        enum: ['Paid', 'Unpaid', 'Pending'],
+        enum: ['Paid', 'Unpaid', 'Pending', 'Cancelled'],
         default: 'Unpaid'
+    },
+    statusHistory: [{
+        status: { type: String, required: true },
+        note: { type: String, trim: true },
+        editedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        editedAt: { type: Date, default: Date.now }
+    }],
+    // Edit/cancellation audit trail
+    originalInvoiceRef: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Invoice',
+        default: null
+    },
+    cancelledBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
+    cancellationNote: {
+        type: String,
+        trim: true,
+        default: ''
     },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
