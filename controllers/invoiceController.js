@@ -96,6 +96,11 @@ exports.createInvoice = async (req, res) => {
             return res.status(400).json({ success: false, message: 'At least one item is required' });
         }
 
+        // Business rule: every invoice must be linked to a project for warranty tracking
+        if (!projectId) {
+            return res.status(400).json({ success: false, message: 'A project must be selected for this invoice' });
+        }
+
         const latestInvoice = await Invoice.findOne().sort({ createdAt: -1 });
         let sequence = 1;
         if (latestInvoice && latestInvoice.invoiceNumber) {
@@ -132,7 +137,7 @@ exports.createInvoice = async (req, res) => {
         const invoice = await Invoice.create(invoiceData);
 
         for (const item of items) {
-            if (item.productRef && creationMethod === 'automatic') {
+            if (item.productRef && (creationMethod === 'automatic' || (creationMethod === 'manual' && item.serialNumbers?.length > 0))) {
                 let remainingQty = item.quantity;
 
                 const stockEntries = await StockEntry.find({
@@ -143,25 +148,42 @@ exports.createInvoice = async (req, res) => {
                 for (const entry of stockEntries) {
                     if (remainingQty <= 0) break;
 
-                    const reduceQty = Math.min(remainingQty, entry.quantity);
-                    entry.quantity -= reduceQty;
-                    remainingQty -= reduceQty;
+                    // For automatic mode — reduce quantity
+                    if (creationMethod === 'automatic') {
+                        const reduceQty = Math.min(remainingQty, entry.quantity);
+                        entry.quantity -= reduceQty;
+                        remainingQty -= reduceQty;
+                    }
 
+                    // Deduct matched serial numbers from stock entry (both modes)
                     if (item.serialNumbers && item.serialNumbers.length > 0) {
                         const serialsToRemove = item.serialNumbers.filter(sn =>
                             entry.serialNumbers.includes(sn.toUpperCase())
                         );
-                        entry.serialNumbers = entry.serialNumbers.filter(
-                            sn => !serialsToRemove.includes(sn.toUpperCase())
-                        );
+                        if (serialsToRemove.length > 0) {
+                            entry.serialNumbers = entry.serialNumbers.filter(
+                                sn => !serialsToRemove.map(s => s.toUpperCase()).includes(sn.toUpperCase())
+                            );
+                            // In manual mode, reduce qty by the number of serials removed from this entry
+                            if (creationMethod === 'manual') {
+                                entry.quantity = Math.max(0, entry.quantity - serialsToRemove.length);
+                            }
+                        }
                     }
 
                     await entry.save();
                 }
 
-                await Product.findByIdAndUpdate(item.productRef, {
-                    $inc: { quantity: -item.quantity }
-                });
+                if (creationMethod === 'automatic') {
+                    await Product.findByIdAndUpdate(item.productRef, {
+                        $inc: { quantity: -item.quantity }
+                    });
+                } else if (creationMethod === 'manual' && item.serialNumbers?.length > 0) {
+                    // Reduce product stock count by the number of serials consumed
+                    await Product.findByIdAndUpdate(item.productRef, {
+                        $inc: { quantity: -item.serialNumbers.length }
+                    });
+                }
             }
         }
 
@@ -173,6 +195,13 @@ exports.createInvoice = async (req, res) => {
 
         const warrantyRecords = [];
         const startDate = invoiceDate ? new Date(invoiceDate) : new Date();
+
+        // Fetch project location once for all warranty records
+        let projectLocation = '';
+        if (projectId) {
+            const proj = await Project.findById(projectId).select('location');
+            projectLocation = proj?.location || '';
+        }
 
         for (const item of items) {
             if (item.serialNumbers && item.serialNumbers.length > 0 && item.productRef) {
@@ -186,6 +215,7 @@ exports.createInvoice = async (req, res) => {
                             invoiceRef: invoice._id,
                             clientRef: clientRef || null,
                             projectRef: projectId || null,
+                            projectLocation,
                             productRef: item.productRef,
                             serialNumber: serial.toUpperCase(),
                             warrantyPeriod,

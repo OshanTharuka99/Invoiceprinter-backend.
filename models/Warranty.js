@@ -15,6 +15,11 @@ const warrantySchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Project'
     },
+    projectLocation: {
+        type: String,
+        trim: true,
+        default: ''
+    },
     productRef: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Product',

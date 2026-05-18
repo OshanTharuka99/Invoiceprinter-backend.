@@ -14,7 +14,7 @@ exports.getWarranties = async (req, res) => {
         const warranties = await Warranty.find(query)
             .populate('invoiceRef', 'invoiceNumber manualClientDetails')
             .populate('clientRef', 'firstName lastName clientId')
-            .populate('projectRef', 'projectId name')
+            .populate('projectRef', 'projectId name location')
             .populate('productRef', 'name productId warrantyPeriod')
             .sort({ expiryDate: 1 });
 
@@ -48,7 +48,7 @@ exports.getWarrantyById = async (req, res) => {
         const warranty = await Warranty.findById(req.params.id)
             .populate('invoiceRef', 'invoiceNumber manualClientDetails')
             .populate('clientRef', 'firstName lastName clientId')
-            .populate('projectRef', 'projectId name')
+            .populate('projectRef', 'projectId name location')
             .populate('productRef', 'name productId warrantyPeriod');
         if (!warranty) return res.status(404).json({ success: false, message: 'Warranty not found' });
         res.status(200).json({ success: true, data: warranty });
@@ -70,7 +70,7 @@ exports.updateWarrantyStatus = async (req, res) => {
             { new: true }
         ).populate('invoiceRef', 'invoiceNumber manualClientDetails')
             .populate('clientRef', 'firstName lastName clientId')
-            .populate('projectRef', 'projectId name')
+            .populate('projectRef', 'projectId name location')
             .populate('productRef', 'name productId warrantyPeriod');
 
         if (!warranty) return res.status(404).json({ success: false, message: 'Warranty not found' });
