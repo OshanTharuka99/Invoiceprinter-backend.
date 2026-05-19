@@ -141,6 +141,26 @@ const businessDetailsSchema = new mongoose.Schema({
         trim: true,
         default: ''
     },
+    // Document formatting configuration
+    quotationPrefix: { type: String, default: 'QN', trim: true },
+    quotationDigits: { type: Number, default: 5 },
+    quotationTitleColor: { type: String, default: '#0f172a' },
+    quotationDividerColor: { type: String, default: '#0f172a' },
+
+    invoicePrefix: { type: String, default: 'INV', trim: true },
+    invoiceDigits: { type: Number, default: 5 },
+    invoiceTitleColor: { type: String, default: '#0f172a' },
+    invoiceDividerColor: { type: String, default: '#0f172a' },
+
+    purchaseOrderPrefix: { type: String, default: 'PO', trim: true },
+    purchaseOrderDigits: { type: Number, default: 5 },
+    purchaseOrderTitleColor: { type: String, default: '#0284c7' },
+    purchaseOrderDividerColor: { type: String, default: '#0284c7' },
+    // Page size configuration
+    pageSizePreset: { type: String, default: 'A4' },
+    pageWidth: { type: Number, default: 210 },
+    pageHeight: { type: Number, default: 297 },
+    iconColor: { type: String, default: '#3b82f6' },
     stores: [{
         name: { type: String, trim: true },
         address: { type: String, trim: true },

@@ -3,7 +3,7 @@ FROM node:20-alpine
 
 RUN npm install -g nodemon
 
-WORKDIR /invoiceprint_backend_app
+WORKDIR /app
 
 COPY . .
 

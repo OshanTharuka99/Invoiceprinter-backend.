@@ -2,6 +2,7 @@ const Quotation = require('../models/Quotation');
 const QuotationDeleteRequest = require('../models/QuotationDeleteRequest');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
+const BusinessDetails = require('../models/BusinessDetails');
 
 const createNotification = async (recipientId, type, title, message, relatedId = null) => {
     try {
@@ -19,14 +20,22 @@ const createNotification = async (recipientId, type, title, message, relatedId =
 
 exports.createQuotation = async (req, res) => {
     try {
-        // Find latest quotation to determine the next QN ID sequence
-        const latest = await Quotation.findOne().sort({ createdAt: -1 });
+        const bizDetails = await BusinessDetails.findOne();
+        const prefix = bizDetails?.quotationPrefix || 'QN';
+        const digits = bizDetails?.quotationDigits || 5;
+
+        const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const latest = await Quotation.findOne({
+            quotationId: new RegExp('^' + escapedPrefix)
+        }).sort({ createdAt: -1 });
+
         let sequence = 1;
-        if (latest && latest.quotationId && latest.quotationId.startsWith('QN')) {
-            const num = parseInt(latest.quotationId.substring(2), 10);
+        if (latest && latest.quotationId) {
+            const suffixStr = latest.quotationId.substring(prefix.length);
+            const num = parseInt(suffixStr, 10);
             if (!isNaN(num)) sequence = num + 1;
         }
-        const quotationId = `QN${sequence.toString().padStart(5, '0')}`;
+        const quotationId = `${prefix}${sequence.toString().padStart(digits, '0')}`;
         let payload = { ...req.body };
         if (payload.clientRef === "") payload.clientRef = undefined;
         if (payload.projectId === "") payload.projectId = undefined;

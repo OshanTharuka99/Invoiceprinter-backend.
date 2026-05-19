@@ -6,6 +6,7 @@ const Product = require('../models/Product');
 const StockEntry = require('../models/StockEntry');
 const Project = require('../models/Project');
 const Warranty = require('../models/Warranty');
+const BusinessDetails = require('../models/BusinessDetails');
 
 const createNotification = async (recipientId, type, title, message, relatedId = null) => {
     try {
@@ -208,15 +209,22 @@ exports.createInvoice = async (req, res) => {
             return res.status(400).json({ success: false, message: 'A project must be selected for this invoice' });
         }
 
-        const latestInvoice = await Invoice.findOne().sort({ createdAt: -1 });
+        const bizDetails = await BusinessDetails.findOne();
+        const prefix = bizDetails?.invoicePrefix || 'INV';
+        const digits = bizDetails?.invoiceDigits || 5;
+
+        const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const latestInvoice = await Invoice.findOne({
+            invoiceNumber: new RegExp('^' + escapedPrefix)
+        }).sort({ createdAt: -1 });
+
         let sequence = 1;
         if (latestInvoice && latestInvoice.invoiceNumber) {
-            const match = latestInvoice.invoiceNumber.match(/INV(\d+)/);
-            if (match) {
-                sequence = parseInt(match[1], 10) + 1;
-            }
+            const suffixStr = latestInvoice.invoiceNumber.substring(prefix.length);
+            const num = parseInt(suffixStr, 10);
+            if (!isNaN(num)) sequence = num + 1;
         }
-        const invoiceNumber = `INV${sequence.toString().padStart(5, '0')}`;
+        const invoiceNumber = `${prefix}${sequence.toString().padStart(digits, '0')}`;
 
         // Enforce Paid status for Cash payment method
         const initialStatus = paymentMethod === 'cash' ? 'Paid' : (status || 'Unpaid');
@@ -444,13 +452,22 @@ exports.editInvoice = async (req, res) => {
         await originalInvoice.save();
 
         // 5. Generate new invoice number
-        const latestInvoice = await Invoice.findOne().sort({ createdAt: -1 });
+        const bizDetails = await BusinessDetails.findOne();
+        const prefix = bizDetails?.invoicePrefix || 'INV';
+        const digits = bizDetails?.invoiceDigits || 5;
+
+        const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const latestInvoice = await Invoice.findOne({
+            invoiceNumber: new RegExp('^' + escapedPrefix)
+        }).sort({ createdAt: -1 });
+
         let sequence = 1;
         if (latestInvoice && latestInvoice.invoiceNumber) {
-            const match = latestInvoice.invoiceNumber.match(/INV(\d+)/);
-            if (match) sequence = parseInt(match[1], 10) + 1;
+            const suffixStr = latestInvoice.invoiceNumber.substring(prefix.length);
+            const num = parseInt(suffixStr, 10);
+            if (!isNaN(num)) sequence = num + 1;
         }
-        const newInvoiceNumber = `INV${sequence.toString().padStart(5, '0')}`;
+        const newInvoiceNumber = `${prefix}${sequence.toString().padStart(digits, '0')}`;
 
         const initialStatus = paymentMethod === 'cash' ? 'Paid' : (status || 'Unpaid');
 

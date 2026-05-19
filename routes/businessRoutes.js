@@ -10,7 +10,7 @@ router.use(authMiddleware.protect);
 // GET is accessible by both Admin and Root
 router.get('/', businessController.getDetails);
 
-// UPDATE is restricted to ROOT only
-router.patch('/', authMiddleware.restrictTo('root'), businessController.updateDetails);
+// UPDATE is restricted to ROOT and ADMIN
+router.patch('/', authMiddleware.restrictTo('root', 'admin'), businessController.updateDetails);
 
 module.exports = router;

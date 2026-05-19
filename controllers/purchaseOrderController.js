@@ -1,15 +1,24 @@
 const PurchaseOrder = require('../models/PurchaseOrder');
+const BusinessDetails = require('../models/BusinessDetails');
 
 exports.createPurchaseOrder = async (req, res) => {
     try {
-        // Find latest purchase order to determine next PO sequence
-        const latest = await PurchaseOrder.findOne().sort({ createdAt: -1 });
+        const bizDetails = await BusinessDetails.findOne();
+        const prefix = bizDetails?.purchaseOrderPrefix || 'PO';
+        const digits = bizDetails?.purchaseOrderDigits || 5;
+
+        const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const latest = await PurchaseOrder.findOne({
+            poNumber: new RegExp('^' + escapedPrefix)
+        }).sort({ createdAt: -1 });
+
         let sequence = 1;
-        if (latest && latest.poNumber && latest.poNumber.startsWith('PO')) {
-            const num = parseInt(latest.poNumber.substring(2), 10);
+        if (latest && latest.poNumber) {
+            const suffixStr = latest.poNumber.substring(prefix.length);
+            const num = parseInt(suffixStr, 10);
             if (!isNaN(num)) sequence = num + 1;
         }
-        const poNumber = `PO${sequence.toString().padStart(5, '0')}`;
+        const poNumber = `${prefix}${sequence.toString().padStart(digits, '0')}`;
         
         let payload = { ...req.body };
         if (payload.supplierRef === "") payload.supplierRef = undefined;

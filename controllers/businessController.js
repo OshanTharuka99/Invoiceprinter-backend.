@@ -25,9 +25,9 @@ exports.getDetails = async (req, res) => {
 
 exports.updateDetails = async (req, res) => {
     try {
-        // Restrict to ROOT role only - though handled in routes, good to have here too
-        if (req.user.role !== 'root') {
-            return res.status(403).json({ message: 'Only ROOT user can edit business details.' });
+        // Restrict to ROOT or ADMIN roles only - though handled in routes, good to have here too
+        if (req.user.role !== 'root' && req.user.role !== 'admin') {
+            return res.status(403).json({ message: 'Only ROOT or ADMIN users can edit business details.' });
         }
 
         let details = await BusinessDetails.findOne();
