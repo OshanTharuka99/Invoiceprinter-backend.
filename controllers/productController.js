@@ -1,6 +1,18 @@
 const Product = require('../models/Product');
 const Category = require('../models/Category');
 const StockEntry = require('../models/StockEntry');
+const BusinessDetails = require('../models/BusinessDetails');
+const AuditLog = require('../models/AuditLog');
+const InventoryEditRequest = require('../models/InventoryEditRequest');
+const User = require('../models/User');
+const Notification = require('../models/Notification');
+
+const createNotification = async (recipientId, type, title, message, relatedId = null) => {
+    try {
+        await Notification.create({ recipient: recipientId, type, title, message, relatedId });
+    } catch (err) { console.error('Notification error:', err); }
+};
+
 
 // ── CATEGORY METHODS ─────────────────────────────────────────────────────────
 
@@ -25,12 +37,26 @@ exports.getCategories = async (req, res) => {
 
 exports.updateCategory = async (req, res) => {
     try {
+        const { reason, ...updateData } = req.body;
+        const before = await Category.findById(req.params.id);
+        if (!before) return res.status(404).json({ success: false, message: 'Category not found' });
+
         const category = await Category.findByIdAndUpdate(
             req.params.id,
-            req.body,
+            updateData,
             { new: true, runValidators: true }
         );
-        if (!category) return res.status(404).json({ success: false, message: 'Category not found' });
+
+        await AuditLog.create({
+            action: 'CATEGORY_EDIT',
+            targetType: 'Category',
+            targetId: category._id,
+            targetName: category.name,
+            details: { before: before.toObject(), after: category.toObject() },
+            reason: reason || 'Direct edit by admin',
+            performedBy: req.user._id
+        });
+
         res.status(200).json({ success: true, data: category });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
@@ -94,7 +120,27 @@ exports.createProduct = async (req, res) => {
 exports.getProducts = async (req, res) => {
     try {
         const products = await Product.find().populate('category').sort({ createdAt: -1 });
-        res.status(200).json({ success: true, data: products });
+
+        // Attach available serial numbers from stock entries for serial-tracked products
+        const productIds = products.map(p => p._id);
+        const stockEntries = await StockEntry.find({ product: { $in: productIds } });
+        const serialsByProduct = {};
+        for (const entry of stockEntries) {
+            const pid = entry.product.toString();
+            if (!serialsByProduct[pid]) serialsByProduct[pid] = [];
+            if (entry.hasSerialNumbers && entry.serialNumbers.length > 0) {
+                serialsByProduct[pid].push(...entry.serialNumbers);
+            }
+        }
+
+        const enrichedProducts = products.map(p => {
+            const doc = p.toObject();
+            const pid = p._id.toString();
+            doc.availableSerials = serialsByProduct[pid] || [];
+            return doc;
+        });
+
+        res.status(200).json({ success: true, data: enrichedProducts });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
     }
@@ -103,13 +149,26 @@ exports.getProducts = async (req, res) => {
 exports.updateProduct = async (req, res) => {
     try {
         // Prevent direct quantity manipulation — use stock entries
-        const { quantity, ...updateData } = req.body;
+        const { quantity, reason, ...updateData } = req.body;
+        const before = await Product.findById(req.params.id);
+        if (!before) return res.status(404).json({ success: false, message: 'Product not found' });
+
         const product = await Product.findByIdAndUpdate(
             req.params.id,
             updateData,
             { new: true, runValidators: true }
         );
-        if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+
+        await AuditLog.create({
+            action: 'PRODUCT_EDIT',
+            targetType: 'Product',
+            targetId: product._id,
+            targetName: product.name,
+            details: { before: before.toObject(), after: product.toObject() },
+            reason: reason || 'Direct edit by admin',
+            performedBy: req.user._id
+        });
+
         res.status(200).json({ success: true, data: product });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
@@ -141,6 +200,21 @@ exports.addStockEntry = async (req, res) => {
         const qty = parseInt(quantity, 10);
         if (isNaN(qty) || qty < 1) {
             return res.status(400).json({ success: false, message: 'Quantity must be a positive integer' });
+        }
+
+        // ── Store location validation ─────────────────────────────────────────
+        if (location && location.trim()) {
+            const biz = await BusinessDetails.findOne();
+            const stores = biz?.stores || [];
+            if (stores.length > 0) {
+                const storeNames = stores.map(s => s.name.trim().toLowerCase());
+                if (!storeNames.includes(location.trim().toLowerCase())) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Invalid location. Available stores: ${stores.map(s => s.name).join(', ')}`
+                    });
+                }
+            }
         }
 
         // ── Serial number validation ──────────────────────────────────────────
@@ -216,3 +290,180 @@ exports.getStockEntries = async (req, res) => {
         res.status(400).json({ success: false, message: error.message });
     }
 };
+
+// ── STOCK ENTRY EDIT (admin/root only — direct) ───────────────────────────────
+
+exports.updateStockEntry = async (req, res) => {
+    try {
+        const { reason, ...changes } = req.body;
+        if (!reason) return res.status(400).json({ success: false, message: 'Reason for modification is required' });
+
+        const entry = await StockEntry.findById(req.params.entryId);
+        if (!entry) return res.status(404).json({ success: false, message: 'Stock entry not found' });
+
+        const before = entry.toObject();
+
+        // Prevent arbitrary product reassignment
+        const allowed = ['location', 'buyingPrice', 'quantity', 'notes', 'serialNumbers'];
+        allowed.forEach(f => { if (changes[f] !== undefined) entry[f] = changes[f]; });
+
+        // Sync product-level quantity if quantity changed
+        if (changes.quantity !== undefined) {
+            const diff = changes.quantity - before.quantity;
+            await Product.findByIdAndUpdate(entry.product, { $inc: { quantity: diff } });
+        }
+
+        await entry.save();
+
+        await AuditLog.create({
+            action: 'STOCK_EDIT',
+            targetType: 'StockEntry',
+            targetId: entry._id,
+            targetName: entry.batchRef,
+            details: { before, after: entry.toObject() },
+            reason,
+            performedBy: req.user._id
+        });
+
+        res.status(200).json({ success: true, data: entry });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+// ── INVENTORY EDIT REQUESTS (standard user → approval workflow) ────────────────
+
+exports.createInventoryRequest = async (req, res) => {
+    try {
+        const { type, targetId, targetName, proposedChanges, reason } = req.body;
+        if (!type || !targetId || !proposedChanges || !reason) {
+            return res.status(400).json({ success: false, message: 'type, targetId, proposedChanges, and reason are required' });
+        }
+
+        const request = await InventoryEditRequest.create({
+            type, targetId, targetName: targetName || '', proposedChanges, reason,
+            requestedBy: req.user._id
+        });
+
+        // Notify all admins/root users
+        const admins = await User.find({ role: { $in: ['admin', 'root'] } });
+        for (const admin of admins) {
+            await createNotification(
+                admin._id, 'inventory_request', 'Inventory Edit Request',
+                `${req.user.firstName} ${req.user.lastName} submitted a ${type} edit request for "${targetName || targetId}". Reason: ${reason}`,
+                request._id
+            );
+        }
+
+        res.status(201).json({ success: true, message: 'Edit request submitted for approval', data: request });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+exports.getInventoryRequests = async (req, res) => {
+    try {
+        const requests = await InventoryEditRequest.find({ status: 'Pending' })
+            .populate('requestedBy', 'firstName lastName email')
+            .sort({ createdAt: -1 });
+        res.status(200).json({ success: true, data: requests });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+exports.approveInventoryRequest = async (req, res) => {
+    try {
+        const request = await InventoryEditRequest.findById(req.params.requestId)
+            .populate('requestedBy');
+        if (!request || request.status !== 'Pending') {
+            return res.status(404).json({ success: false, message: 'Pending request not found' });
+        }
+
+        const { type, targetId, proposedChanges, reason } = request;
+        let before = null;
+
+        if (type === 'Product') {
+            const doc = await Product.findById(targetId);
+            before = doc?.toObject();
+            const { quantity, ...safe } = proposedChanges;
+            await Product.findByIdAndUpdate(targetId, safe, { new: true, runValidators: true });
+        } else if (type === 'Category') {
+            const doc = await Category.findById(targetId);
+            before = doc?.toObject();
+            await Category.findByIdAndUpdate(targetId, proposedChanges, { new: true, runValidators: true });
+        } else if (type === 'StockEntry') {
+            const doc = await StockEntry.findById(targetId);
+            before = doc?.toObject();
+            const allowed = ['location', 'buyingPrice', 'quantity', 'notes', 'serialNumbers'];
+            const safe = {};
+            allowed.forEach(f => { if (proposedChanges[f] !== undefined) safe[f] = proposedChanges[f]; });
+            // sync product quantity if changed
+            if (safe.quantity !== undefined && doc) {
+                const diff = safe.quantity - doc.quantity;
+                await Product.findByIdAndUpdate(doc.product, { $inc: { quantity: diff } });
+            }
+            await StockEntry.findByIdAndUpdate(targetId, safe, { new: true });
+        }
+
+        request.status = 'Approved';
+        request.reviewedBy = req.user._id;
+        request.reviewedAt = Date.now();
+        await request.save();
+
+        await AuditLog.create({
+            action: 'INVENTORY_REQUEST_APPROVED',
+            targetType: type,
+            targetId,
+            targetName: request.targetName,
+            details: { before, proposedChanges, approvedBy: req.user._id },
+            reason,
+            performedBy: req.user._id
+        });
+
+        // Notify requester
+        await createNotification(
+            request.requestedBy._id, 'approval', 'Inventory Edit Approved',
+            `Your edit request for "${request.targetName}" has been approved by ${req.user.firstName} ${req.user.lastName}.`
+        );
+
+        res.status(200).json({ success: true, message: 'Inventory edit applied and logged' });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+exports.rejectInventoryRequest = async (req, res) => {
+    try {
+        const request = await InventoryEditRequest.findById(req.params.requestId)
+            .populate('requestedBy');
+        if (!request || request.status !== 'Pending') {
+            return res.status(404).json({ success: false, message: 'Pending request not found' });
+        }
+
+        request.status = 'Rejected';
+        request.reviewedBy = req.user._id;
+        request.reviewedAt = Date.now();
+        await request.save();
+
+        await AuditLog.create({
+            action: 'INVENTORY_REQUEST_REJECTED',
+            targetType: request.type,
+            targetId: request.targetId,
+            targetName: request.targetName,
+            details: { proposedChanges: request.proposedChanges },
+            reason: request.reason,
+            performedBy: req.user._id
+        });
+
+        await createNotification(
+            request.requestedBy._id, 'rejection', 'Inventory Edit Rejected',
+            `Your edit request for "${request.targetName}" has been rejected by ${req.user.firstName} ${req.user.lastName}.`
+        );
+
+        res.status(200).json({ success: true, message: 'Inventory edit request rejected' });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+

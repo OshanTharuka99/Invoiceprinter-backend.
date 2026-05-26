@@ -10,6 +10,9 @@ router.route('/')
 
 router.route('/:id')
     .get(warrantyController.getWarrantyById)
-    .patch(restrictTo('admin', 'root'), warrantyController.updateWarrantyStatus);
+    .patch(restrictTo('admin', 'root'), warrantyController.updateWarrantyStatus)
+    .delete(restrictTo('admin', 'root'), warrantyController.deleteWarranty);
+
+router.patch('/:id/serial', restrictTo('admin', 'root'), warrantyController.updateWarrantySerial);
 
 module.exports = router;

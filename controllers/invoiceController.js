@@ -43,15 +43,27 @@ const reverseInvoiceStock = async (invoice) => {
         let entry = await StockEntry.findOne({ product: item.productRef }).sort({ createdAt: -1 });
 
         if (hasSerials) {
-            // Restore serial numbers back to the stock entry
+            const upperSerials = item.serialNumbers.map(s => s.toUpperCase());
+
             if (entry) {
-                const upperSerials = item.serialNumbers.map(s => s.toUpperCase());
                 const newSerials = [...new Set([...entry.serialNumbers, ...upperSerials])];
                 entry.serialNumbers = newSerials;
                 if (isManual) {
                     entry.quantity += item.serialNumbers.length;
                 }
                 await entry.save();
+            } else {
+                // No existing stock entry — create one to hold the freed serials
+                const product = await Product.findById(item.productRef).select('productId name');
+                await StockEntry.create({
+                    product: item.productRef,
+                    batchRef: `${product?.productId || 'STOCK'}-RESTORED-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                    quantity: item.serialNumbers.length,
+                    serialNumbers: upperSerials,
+                    hasSerialNumbers: true,
+                    notes: `Restored from invoice ${invoice.invoiceNumber || ''}`,
+                    addedBy: invoice.cancelledBy || invoice.createdBy
+                });
             }
         }
 
@@ -126,6 +138,59 @@ const applyStockDeductions = async (items, creationMethod) => {
             }
         }
     }
+};
+
+// Check if there is enough stock for the requested items
+const validateStockAvailability = async (items, creationMethod, extraStock = []) => {
+    const warnings = [];
+    for (const item of items) {
+        if (!item.productRef) continue;
+
+        if (creationMethod === 'automatic') {
+            const stockEntries = await StockEntry.find({ product: item.productRef, quantity: { $gt: 0 } });
+            let availableQty = stockEntries.reduce((sum, e) => sum + e.quantity, 0);
+
+            // Add extra stock (e.g., stock being restored from an edited invoice)
+            const extraForProduct = extraStock
+                .filter(es => es.productRef && es.productRef.toString() === item.productRef.toString())
+                .reduce((sum, es) => sum + (es.quantity || 0), 0);
+            availableQty += extraForProduct;
+
+            if (item.quantity > availableQty) {
+                const product = await Product.findById(item.productRef).select('name productId');
+                warnings.push({
+                    product: product?.name || 'Unknown',
+                    productId: product?.productId || '',
+                    requested: item.quantity,
+                    available: availableQty
+                });
+            }
+        } else if (creationMethod === 'manual' && item.serialNumbers?.length > 0) {
+            const entries = await StockEntry.find({ product: item.productRef });
+            const allAvailableSerials = new Set(
+                entries.flatMap(e => e.serialNumbers.map(s => s.toUpperCase()))
+            );
+
+            // Add serials from extra stock (restored from edit)
+            for (const es of extraStock) {
+                if (es.productRef && es.productRef.toString() === item.productRef.toString() && es.serialNumbers) {
+                    es.serialNumbers.forEach(s => allAvailableSerials.add(s.toUpperCase()));
+                }
+            }
+
+            const requestedSerials = item.serialNumbers.map(s => s.toUpperCase());
+            const missingSerials = requestedSerials.filter(s => !allAvailableSerials.has(s));
+            if (missingSerials.length > 0) {
+                const product = await Product.findById(item.productRef).select('name productId');
+                warnings.push({
+                    product: product?.name || 'Unknown',
+                    productId: product?.productId || '',
+                    missingSerials
+                });
+            }
+        }
+    }
+    return warnings;
 };
 
 const calculateWarrantyExpiry = (startDate, warrantyPeriod) => {
@@ -207,6 +272,18 @@ exports.createInvoice = async (req, res) => {
         // Business rule: every invoice must be linked to a project for warranty tracking
         if (!projectId) {
             return res.status(400).json({ success: false, message: 'A project must be selected for this invoice' });
+        }
+
+        // Validate stock availability before creating
+        if (creationMethod === 'automatic' || creationMethod === 'manual') {
+            const stockWarnings = await validateStockAvailability(items, creationMethod);
+            if (stockWarnings.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Insufficient stock for some items',
+                    stockWarnings
+                });
+            }
         }
 
         const bizDetails = await BusinessDetails.findOne();
@@ -428,6 +505,17 @@ exports.editInvoice = async (req, res) => {
             return res.status(400).json({ success: false, message: 'A project must be selected' });
         }
 
+        // Validate stock: available stock = current stock + stock from original invoice being restored
+        const method = creationMethod || originalInvoice.creationMethod;
+        const stockWarnings = await validateStockAvailability(items, method, originalInvoice.items);
+        if (stockWarnings.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Insufficient stock for some items',
+                stockWarnings
+            });
+        }
+
         // 1. Reverse stock effects of the original invoice
         await reverseInvoiceStock(originalInvoice);
 
@@ -505,7 +593,7 @@ exports.editInvoice = async (req, res) => {
         });
 
         // 7. Apply new stock deductions
-        await applyStockDeductions(items, creationMethod || originalInvoice.creationMethod);
+        await applyStockDeductions(items, method);
 
         // 8. Update project value
         if (projectId) {
@@ -623,16 +711,18 @@ exports.getInvoiceStats = async (req, res) => {
         }
 
         const dateMatch = { createdAt: { $gte: start, $lt: end } };
+        const activeMatch = { ...dateMatch, status: { $ne: 'Cancelled' } };
 
-        const totalInvoices = await Invoice.countDocuments(dateMatch);
+        const totalInvoices = await Invoice.countDocuments(activeMatch);
+        const cancelledCount = await Invoice.countDocuments({ ...dateMatch, status: 'Cancelled' });
 
         const totalSales = await Invoice.aggregate([
-            { $match: dateMatch },
+            { $match: activeMatch },
             { $group: { _id: null, total: { $sum: '$finalTotal' } } }
         ]);
 
         const paymentMethodBreakdown = await Invoice.aggregate([
-            { $match: dateMatch },
+            { $match: activeMatch },
             { $group: { _id: '$paymentMethod', count: { $sum: 1 }, total: { $sum: '$finalTotal' } } }
         ]);
 
@@ -642,7 +732,7 @@ exports.getInvoiceStats = async (req, res) => {
         ]);
 
         const salesOverTime = await Invoice.aggregate([
-            { $match: dateMatch },
+            { $match: activeMatch },
             {
                 $group: {
                     _id: { $dateToString: { format: dateFormat, date: '$createdAt' } },
@@ -653,7 +743,7 @@ exports.getInvoiceStats = async (req, res) => {
             { $sort: { _id: 1 } }
         ]);
 
-        const recentInvoices = await Invoice.find(dateMatch)
+        const recentInvoices = await Invoice.find(activeMatch)
             .populate('clientRef', 'firstName lastName')
             .sort({ createdAt: -1 })
             .limit(10);
@@ -664,6 +754,7 @@ exports.getInvoiceStats = async (req, res) => {
                 period: period || 'yearly',
                 dateRange: { start, end },
                 totalInvoices,
+                cancelledCount,
                 totalSales: totalSales[0]?.total || 0,
                 paymentMethodBreakdown,
                 statusBreakdown,

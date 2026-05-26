@@ -114,6 +114,33 @@ exports.updateUser = async (req, res) => {
     }
 };
 
+exports.updateMe = async (req, res) => {
+    try {
+        // Block email changes via this endpoint
+        if (req.body.email) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Email address cannot be changed. Please contact your administrator.'
+            });
+        }
+
+        const allowedFields = ['firstName', 'lastName', 'designation', 'sex', 'telephoneNumber', 'profilePicture'];
+        const user = await User.findById(req.user._id);
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        allowedFields.forEach(field => {
+            if (req.body[field] !== undefined) {
+                user[field] = req.body[field];
+            }
+        });
+
+        await user.save();
+        res.status(200).json({ status: 'success', data: { user } });
+    } catch (error) {
+        res.status(400).json({ status: 'fail', message: error.message });
+    }
+};
+
 exports.changePassword = async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;

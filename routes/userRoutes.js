@@ -7,8 +7,9 @@ const router = express.Router();
 // Protect all routes after this middleware
 router.use(authMiddleware.protect);
 
-// All authenticated users can change their own password
+// All authenticated users can change their own password or update their own profile
 router.post('/change-password', userController.changePassword);
+router.patch('/update-me', userController.updateMe);
 
 // Only admin and root can access these routes
 router.use(authMiddleware.restrictTo('admin', 'root'));

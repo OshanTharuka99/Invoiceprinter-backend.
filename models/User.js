@@ -44,7 +44,11 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
-    passwordChangedAt: Date
+    passwordChangedAt: Date,
+    profilePicture: {
+        type: String,
+        default: null
+    }
 }, { timestamps: true });
 
 // Hash password before saving
