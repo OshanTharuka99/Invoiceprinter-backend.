@@ -156,6 +156,13 @@ const businessDetailsSchema = new mongoose.Schema({
     purchaseOrderDigits: { type: Number, default: 5 },
     purchaseOrderTitleColor: { type: String, default: '#0284c7' },
     purchaseOrderDividerColor: { type: String, default: '#0284c7' },
+
+    deliveryNotePrefix: { type: String, default: 'DN', trim: true },
+    deliveryNoteDigits: { type: Number, default: 5 },
+    deliveryNoteTitleColor: { type: String, default: '#8b5cf6' },
+    deliveryNoteDividerColor: { type: String, default: '#8b5cf6' },
+    deliveryNoteTerms: { type: String, trim: true, default: 'Standard delivery terms apply.' },
+    deliveryNoteNotes: { type: String, trim: true, default: '' },
     // Page size configuration
     pageSizePreset: { type: String, default: 'A4' },
     pageWidth: { type: Number, default: 210 },
