@@ -60,6 +60,11 @@ const invoiceSchema = new mongoose.Schema({
         trim: true,
         default: ''
     },
+    customerPO: {
+        type: String,
+        trim: true,
+        default: ''
+    },
     items: [{
         productRef: {
             type: mongoose.Schema.Types.ObjectId,
@@ -91,6 +96,11 @@ const invoiceSchema = new mongoose.Schema({
         editedAt: { type: Date, default: Date.now }
     }],
     // Edit/cancellation audit trail
+    deliveryNoteRef: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'DeliveryNote',
+        default: null
+    },
     originalInvoiceRef: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Invoice',

@@ -235,6 +235,7 @@ exports.getInvoices = async (req, res) => {
             .populate('createdBy', 'firstName lastName')
             .populate('statusHistory.editedBy', 'firstName lastName')
             .populate('items.productRef', 'name productId warrantyPeriod')
+            .populate('deliveryNoteRef', 'deliveryNoteNumber')
             .sort({ createdAt: -1 });
         res.status(200).json({ success: true, data: invoices });
     } catch (error) {
@@ -252,6 +253,7 @@ exports.createInvoice = async (req, res) => {
             paymentMethod,
             creditPeriod,
             deliveryAddress,
+            customerPO,
             items,
             subTotal,
             appliedDiscounts,
@@ -262,7 +264,8 @@ exports.createInvoice = async (req, res) => {
             finalTotal,
             currency,
             status,
-            invoiceDate
+            invoiceDate,
+            deliveryNoteRef
         } = req.body;
 
         if (!items || items.length === 0) {
@@ -274,8 +277,10 @@ exports.createInvoice = async (req, res) => {
             return res.status(400).json({ success: false, message: 'A project must be selected for this invoice' });
         }
 
-        // Validate stock availability before creating
-        if (creationMethod === 'automatic' || creationMethod === 'manual') {
+        // Skip stock validation & deduction for DN-based invoices (stock already deducted on DN delivery)
+        const isFromDN = !!deliveryNoteRef;
+
+        if (!isFromDN && (creationMethod === 'automatic' || creationMethod === 'manual')) {
             const stockWarnings = await validateStockAvailability(items, creationMethod);
             if (stockWarnings.length > 0) {
                 return res.status(400).json({
@@ -315,6 +320,7 @@ exports.createInvoice = async (req, res) => {
             paymentMethod,
             creditPeriod: creditPeriod || { duration: 0, unit: 'days' },
             deliveryAddress: deliveryAddress || '',
+            customerPO: customerPO || '',
             items,
             subTotal,
             appliedDiscounts: appliedDiscounts || [],
@@ -332,12 +338,15 @@ exports.createInvoice = async (req, res) => {
                 editedAt: Date.now()
             }],
             invoiceDate: invoiceDate || Date.now(),
+            deliveryNoteRef: isFromDN ? deliveryNoteRef : null,
             createdBy: req.user._id
         };
 
         const invoice = await Invoice.create(invoiceData);
 
-        await applyStockDeductions(items, creationMethod);
+        if (!isFromDN) {
+            await applyStockDeductions(items, creationMethod);
+        }
 
         if (projectId) {
             await Project.findByIdAndUpdate(projectId, {
@@ -346,37 +355,40 @@ exports.createInvoice = async (req, res) => {
         }
 
         const warrantyRecords = [];
-        const startDate = invoiceDate ? new Date(invoiceDate) : new Date();
 
-        // Fetch project location once for all warranty records
-        let projectLocation = '';
-        if (projectId) {
-            const proj = await Project.findById(projectId).select('location');
-            projectLocation = proj?.location || '';
-        }
+        // Skip warranty creation for DN-based invoices (warranties already registered on DN delivery)
+        if (!isFromDN) {
+            const startDate = invoiceDate ? new Date(invoiceDate) : new Date();
 
-        for (const item of items) {
-            if (item.serialNumbers && item.serialNumbers.length > 0 && item.productRef) {
-                const product = await Product.findById(item.productRef);
-                const warrantyPeriod = product?.warrantyPeriod || '';
-                const expiryDate = calculateWarrantyExpiry(startDate, warrantyPeriod);
+            let projectLocation = '';
+            if (projectId) {
+                const proj = await Project.findById(projectId).select('location');
+                projectLocation = proj?.location || '';
+            }
 
-                for (const serial of item.serialNumbers) {
-                    try {
-                        const warranty = await Warranty.create({
-                            invoiceRef: invoice._id,
-                            clientRef: clientRef || null,
-                            projectRef: projectId || null,
-                            projectLocation,
-                            productRef: item.productRef,
-                            serialNumber: serial.toUpperCase(),
-                            warrantyPeriod,
-                            startDate,
-                            expiryDate
-                        });
-                        warrantyRecords.push(warranty);
-                    } catch (err) {
-                        console.error(`Warranty creation failed for serial ${serial}:`, err.message);
+            for (const item of items) {
+                if (item.serialNumbers && item.serialNumbers.length > 0 && item.productRef) {
+                    const product = await Product.findById(item.productRef);
+                    const warrantyPeriod = product?.warrantyPeriod || '';
+                    const expiryDate = calculateWarrantyExpiry(startDate, warrantyPeriod);
+
+                    for (const serial of item.serialNumbers) {
+                        try {
+                            const warranty = await Warranty.create({
+                                invoiceRef: invoice._id,
+                                clientRef: clientRef || null,
+                                projectRef: projectId || null,
+                                projectLocation,
+                                productRef: item.productRef,
+                                serialNumber: serial.toUpperCase(),
+                                warrantyPeriod,
+                                startDate,
+                                expiryDate
+                            });
+                            warrantyRecords.push(warranty);
+                        } catch (err) {
+                            console.error(`Warranty creation failed for serial ${serial}:`, err.message);
+                        }
                     }
                 }
             }
@@ -387,7 +399,8 @@ exports.createInvoice = async (req, res) => {
             .populate('projectId')
             .populate('createdBy', 'firstName lastName')
             .populate('statusHistory.editedBy', 'firstName lastName')
-            .populate('items.productRef', 'name productId warrantyPeriod');
+            .populate('items.productRef', 'name productId warrantyPeriod')
+            .populate('deliveryNoteRef', 'deliveryNoteNumber');
 
         res.status(201).json({
             success: true,
@@ -406,7 +419,8 @@ exports.getInvoiceById = async (req, res) => {
             .populate('projectId')
             .populate('createdBy', 'firstName lastName')
             .populate('statusHistory.editedBy', 'firstName lastName')
-            .populate('items.productRef', 'name productId warrantyPeriod');
+            .populate('items.productRef', 'name productId warrantyPeriod')
+            .populate('deliveryNoteRef', 'deliveryNoteNumber');
         if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
         res.status(200).json({ success: true, data: invoice });
     } catch (error) {
@@ -420,7 +434,8 @@ exports.updateInvoice = async (req, res) => {
             .populate('clientRef')
             .populate('projectId')
             .populate('statusHistory.editedBy', 'firstName lastName')
-            .populate('items.productRef', 'name productId warrantyPeriod');
+            .populate('items.productRef', 'name productId warrantyPeriod')
+            .populate('deliveryNoteRef', 'deliveryNoteNumber');
         if (!updatedInvoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
         res.status(200).json({ success: true, data: updatedInvoice });
     } catch (error) {
@@ -455,7 +470,8 @@ exports.updateInvoiceStatus = async (req, res) => {
             .populate('projectId')
             .populate('createdBy', 'firstName lastName')
             .populate('statusHistory.editedBy', 'firstName lastName')
-            .populate('items.productRef', 'name productId warrantyPeriod');
+            .populate('items.productRef', 'name productId warrantyPeriod')
+            .populate('deliveryNoteRef', 'deliveryNoteNumber');
 
         res.status(200).json({ success: true, data: updatedInvoice });
     } catch (error) {
@@ -484,6 +500,7 @@ exports.editInvoice = async (req, res) => {
             paymentMethod,
             creditPeriod,
             deliveryAddress,
+            customerPO,
             items,
             subTotal,
             appliedDiscounts,
@@ -505,22 +522,26 @@ exports.editInvoice = async (req, res) => {
             return res.status(400).json({ success: false, message: 'A project must be selected' });
         }
 
-        // Validate stock: available stock = current stock + stock from original invoice being restored
+        const isFromDN = !!originalInvoice.deliveryNoteRef;
         const method = creationMethod || originalInvoice.creationMethod;
-        const stockWarnings = await validateStockAvailability(items, method, originalInvoice.items);
-        if (stockWarnings.length > 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Insufficient stock for some items',
-                stockWarnings
-            });
+
+        // Skip stock validation & reversal for DN-based invoices (stock already handled at DN delivery)
+        if (!isFromDN) {
+            const stockWarnings = await validateStockAvailability(items, method, originalInvoice.items);
+            if (stockWarnings.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Insufficient stock for some items',
+                    stockWarnings
+                });
+            }
+
+            // 1. Reverse stock effects of the original invoice
+            await reverseInvoiceStock(originalInvoice);
+
+            // 2. Delete old warranty records linked to original invoice
+            await Warranty.deleteMany({ invoiceRef: originalInvoice._id });
         }
-
-        // 1. Reverse stock effects of the original invoice
-        await reverseInvoiceStock(originalInvoice);
-
-        // 2. Delete old warranty records linked to original invoice
-        await Warranty.deleteMany({ invoiceRef: originalInvoice._id });
 
         // 3. Reverse project value contribution
         await Project.findByIdAndUpdate(originalInvoice.projectId, {
@@ -576,6 +597,7 @@ exports.editInvoice = async (req, res) => {
             paymentMethod,
             creditPeriod: creditPeriod || { duration: 0, unit: 'days' },
             deliveryAddress: deliveryAddress || '',
+            customerPO: customerPO || '',
             items,
             subTotal,
             appliedDiscounts: appliedDiscounts || [],
@@ -588,46 +610,51 @@ exports.editInvoice = async (req, res) => {
             status: initialStatus,
             statusHistory: newHistory,
             originalInvoiceRef: originalInvoice._id,
+            deliveryNoteRef: isFromDN ? originalInvoice.deliveryNoteRef : null,
             invoiceDate: invoiceDate || Date.now(),
             createdBy: req.user._id
         });
 
-        // 7. Apply new stock deductions
-        await applyStockDeductions(items, method);
+        // 7. Apply new stock deductions (skip for DN-based invoices)
+        if (!isFromDN) {
+            await applyStockDeductions(items, method);
+        }
 
         // 8. Update project value
         if (projectId) {
             await Project.findByIdAndUpdate(projectId, { $inc: { value: finalTotal } });
         }
 
-        // 9. Create new warranty records
-        const startDate = invoiceDate ? new Date(invoiceDate) : new Date();
-        let projectLocation = '';
-        if (projectId) {
-            const proj = await Project.findById(projectId).select('location');
-            projectLocation = proj?.location || '';
-        }
+        // 9. Create new warranty records (skip for DN-based — already registered on DN delivery)
+        if (!isFromDN) {
+            const startDate = invoiceDate ? new Date(invoiceDate) : new Date();
+            let projectLocation = '';
+            if (projectId) {
+                const proj = await Project.findById(projectId).select('location');
+                projectLocation = proj?.location || '';
+            }
 
-        for (const item of items) {
-            if (item.serialNumbers && item.serialNumbers.length > 0 && item.productRef) {
-                const product = await Product.findById(item.productRef);
-                const warrantyPeriod = product?.warrantyPeriod || '';
-                const expiryDate = calculateWarrantyExpiry(startDate, warrantyPeriod);
-                for (const serial of item.serialNumbers) {
-                    try {
-                        await Warranty.create({
-                            invoiceRef: newInvoice._id,
-                            clientRef: clientRef || null,
-                            projectRef: projectId || null,
-                            projectLocation,
-                            productRef: item.productRef,
-                            serialNumber: serial.toUpperCase(),
-                            warrantyPeriod,
-                            startDate,
-                            expiryDate
-                        });
-                    } catch (err) {
-                        console.error(`Warranty creation failed for serial ${serial}:`, err.message);
+            for (const item of items) {
+                if (item.serialNumbers && item.serialNumbers.length > 0 && item.productRef) {
+                    const product = await Product.findById(item.productRef);
+                    const warrantyPeriod = product?.warrantyPeriod || '';
+                    const expiryDate = calculateWarrantyExpiry(startDate, warrantyPeriod);
+                    for (const serial of item.serialNumbers) {
+                        try {
+                            await Warranty.create({
+                                invoiceRef: newInvoice._id,
+                                clientRef: clientRef || null,
+                                projectRef: projectId || null,
+                                projectLocation,
+                                productRef: item.productRef,
+                                serialNumber: serial.toUpperCase(),
+                                warrantyPeriod,
+                                startDate,
+                                expiryDate
+                            });
+                        } catch (err) {
+                            console.error(`Warranty creation failed for serial ${serial}:`, err.message);
+                        }
                     }
                 }
             }
@@ -638,7 +665,8 @@ exports.editInvoice = async (req, res) => {
             .populate('projectId')
             .populate('createdBy', 'firstName lastName')
             .populate('statusHistory.editedBy', 'firstName lastName')
-            .populate('items.productRef', 'name productId warrantyPeriod');
+            .populate('items.productRef', 'name productId warrantyPeriod')
+            .populate('deliveryNoteRef', 'deliveryNoteNumber');
 
         res.status(201).json({
             success: true,
@@ -660,13 +688,12 @@ exports.deleteInvoice = async (req, res) => {
             return res.status(403).json({ success: false, message: 'Invoice can only be deleted within 30 days of creation' });
         }
 
-        // Restore stock before deleting
-        if (invoice.status !== 'Cancelled') {
+        // Skip stock reversal/warranty deletion for DN-based invoices (stock handled at DN level)
+        const isFromDN = !!invoice.deliveryNoteRef;
+        if (!isFromDN && invoice.status !== 'Cancelled') {
             await reverseInvoiceStock(invoice);
+            await Warranty.deleteMany({ invoiceRef: invoice._id });
         }
-
-        // Delete related warranties
-        await Warranty.deleteMany({ invoiceRef: invoice._id });
 
         // Soft delete the invoice by setting status to Cancelled
         invoice.status = 'Cancelled';
@@ -823,13 +850,12 @@ exports.approveDeleteRequest = async (req, res) => {
         const invoice = await Invoice.findById(request.invoice);
         if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
 
-        // Restore stock before soft-deleting
-        if (invoice.status !== 'Cancelled') {
+        // Skip stock reversal for DN-based invoices (stock handled at DN level)
+        const isFromDN = !!invoice.deliveryNoteRef;
+        if (!isFromDN && invoice.status !== 'Cancelled') {
             await reverseInvoiceStock(invoice);
+            await Warranty.deleteMany({ invoiceRef: invoice._id });
         }
-
-        // Delete related warranties
-        await Warranty.deleteMany({ invoiceRef: invoice._id });
 
         // Soft delete the invoice by setting status to Cancelled
         invoice.status = 'Cancelled';

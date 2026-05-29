@@ -14,4 +14,7 @@ router.route('/:id')
     .put(deliveryNoteController.updateDeliveryNote)
     .delete(restrictTo('admin', 'root'), deliveryNoteController.deleteDeliveryNote);
 
+router.put('/:id/deliver', deliveryNoteController.deliverDeliveryNote);
+router.get('/:id/for-invoice', deliveryNoteController.getDeliveryNoteForInvoice);
+
 module.exports = router;

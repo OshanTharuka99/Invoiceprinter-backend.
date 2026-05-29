@@ -10,7 +10,7 @@ const deliveryNoteSchema = new mongoose.Schema({
     creationMethod: {
         type: String,
         enum: ['automatic', 'manual'],
-        required: true
+        default: 'automatic'
     },
     clientRef: {
         type: mongoose.Schema.Types.ObjectId,
@@ -48,7 +48,7 @@ const deliveryNoteSchema = new mongoose.Schema({
             ref: 'Product'
         },
         manualName: { type: String, trim: true },
-        quantity: { type: Number, required: true, min: 1 },
+        quantity: { type: Number, required: true, min: 0 },
         serialNumbers: [{ type: String, trim: true }]
     }],
     terms: {
@@ -61,11 +61,43 @@ const deliveryNoteSchema = new mongoose.Schema({
         trim: true,
         default: ''
     },
+    customerPORef: {
+        type: String,
+        trim: true,
+        default: ''
+    },
+    customerName: {
+        type: String,
+        trim: true,
+        default: ''
+    },
+    customerIdNumber: {
+        type: String,
+        trim: true,
+        default: ''
+    },
+    deliveryDate: {
+        type: Date,
+        default: null
+    },
+    status: {
+        type: String,
+        enum: ['Draft', 'Delivered'],
+        default: 'Draft'
+    },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         required: true
-    }
+    },
+    history: [{
+        action: { type: String, required: true },
+        changes: { type: String, trim: true, default: '' },
+        from: { type: String, default: '' },
+        to: { type: String, default: '' },
+        editedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        editedAt: { type: Date, default: Date.now }
+    }]
 }, {
     timestamps: true
 });

@@ -163,6 +163,7 @@ const businessDetailsSchema = new mongoose.Schema({
     deliveryNoteDividerColor: { type: String, default: '#8b5cf6' },
     deliveryNoteTerms: { type: String, trim: true, default: 'Standard delivery terms apply.' },
     deliveryNoteNotes: { type: String, trim: true, default: '' },
+    defaultWarrantyPeriod: { type: String, trim: true, default: '1 year' },
     // Page size configuration
     pageSizePreset: { type: String, default: 'A4' },
     pageWidth: { type: Number, default: 210 },
