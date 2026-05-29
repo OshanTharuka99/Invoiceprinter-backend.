@@ -91,6 +91,11 @@ exports.updateUser = async (req, res) => {
             return res.status(403).json({ message: 'Admins cannot edit other admins or the root user.' });
         }
 
+        // Prevent users from changing their own password via this endpoint
+        if (req.body.password && targetUser._id.toString() === req.user._id.toString()) {
+            return res.status(403).json({ message: 'You cannot change your own password here. Use the Change Password option instead.' });
+        }
+
         // Only allow updating certain fields (protect password and role here, password handled by separate route or specific check)
         const allowedFields = ['firstName', 'lastName', 'designation', 'sex', 'telephoneNumber', 'email'];
         
