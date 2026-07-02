@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { getAuthCookieOptions } = require('../utils/cookieOptions');
 
 const signToken = id => {
     return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -9,17 +10,44 @@ const signToken = id => {
 
 const createSendToken = (user, statusCode, res) => {
     const token = signToken(user._id);
-    
+
     // Remove password from output
     user.password = undefined;
 
+    res.cookie('token', token, getAuthCookieOptions());
+
     res.status(statusCode).json({
         status: 'success',
-        token,
         data: {
             user
         }
     });
+};
+
+exports.logout = (req, res) => {
+    res.clearCookie('token', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    });
+
+    res.status(200).json({ status: 'success', message: 'Logged out successfully' });
+};
+
+exports.getMe = async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id);
+        if (!user) {
+            return res.status(401).json({ message: 'The user belonging to this token no longer exists.' });
+        }
+
+        res.status(200).json({
+            status: 'success',
+            data: { user },
+        });
+    } catch (error) {
+        res.status(500).json({ status: 'error', message: error.message });
+    }
 };
 
 exports.register = async (req, res) => {

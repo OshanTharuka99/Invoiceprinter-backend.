@@ -1,14 +1,23 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
+const securityMiddleware = require('./middleware/security');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3001';
+
+// Security headers (Helmet)
+app.use(securityMiddleware);
 
 // Middleware
-// Middleware
-app.use(cors());
+app.use(cors({
+    origin: CLIENT_URL,
+    credentials: true,
+}));
+app.use(cookieParser());
 app.use(express.json({ limit: '50mb' })); //read json request
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
