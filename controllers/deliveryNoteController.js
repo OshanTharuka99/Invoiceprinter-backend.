@@ -1,5 +1,6 @@
 const DeliveryNote = require('../models/DeliveryNote');
 const BusinessDetails = require('../models/BusinessDetails');
+const { enrichItemsWithUnitCost } = require('../utils/stockCost');
 const StockEntry = require('../models/StockEntry');
 const Product = require('../models/Product');
 const Warranty = require('../models/Warranty');
@@ -273,7 +274,6 @@ exports.deliverDeliveryNote = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Already delivered' });
         }
 
-        deliveryNote.status = 'Delivered';
         deliveryNote.history.push({
             action: 'Delivered',
             changes: 'Status changed from Draft to Delivered. Stock deducted and warranties registered.',
@@ -282,9 +282,16 @@ exports.deliverDeliveryNote = async (req, res) => {
             editedBy: req.user._id,
             editedAt: new Date()
         });
+
+        const enrichedItems = await enrichItemsWithUnitCost(
+            deliveryNote.items,
+            deliveryNote.creationMethod
+        );
+        deliveryNote.items = enrichedItems;
+        deliveryNote.status = 'Delivered';
         await deliveryNote.save();
 
-        await applyStockDeductions(deliveryNote.items, deliveryNote.creationMethod);
+        await applyStockDeductions(enrichedItems, deliveryNote.creationMethod);
         await registerWarranties(deliveryNote, req.user._id);
 
         const populated = await DeliveryNote.findById(deliveryNote._id)
@@ -412,6 +419,7 @@ exports.getDeliveryNoteForInvoice = async (req, res) => {
                 quantity: item.quantity,
                 serialNumbers: item.serialNumbers || [],
                 unitPrice: item.productRef?.price || 0,
+                unitCost: item.unitCost || 0,
                 lineTotal: (item.productRef?.price || 0) * item.quantity
             }))
         };

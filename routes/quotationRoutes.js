@@ -16,16 +16,24 @@ router.route('/delete-requests/:requestId/reject')
     .put(restrictTo('admin', 'root'), quotationController.rejectDeleteRequest);
 
 
+router.route('/lookup')
+    .get(quotationController.lookupQuotation);
+
 // Standard General Routes
 router.route('/')
     .get(quotationController.getQuotations)
     .post(quotationController.createQuotation);
 
-router.route('/:id')
-    .put(quotationController.updateQuotation)
-    .delete(restrictTo('admin', 'root'), quotationController.deleteQuotation); // Restricted Delete Protocol
+router.get('/:id/for-invoice', quotationController.getQuotationForInvoice);
 
 router.route('/:id/request-delete')
     .post(quotationController.requestDelete);
+
+router.route('/:id/edit')
+    .put(restrictTo('root'), quotationController.editQuotation);
+
+router.route('/:id')
+    .put(quotationController.updateQuotation)
+    .delete(restrictTo('admin', 'root'), quotationController.deleteQuotation); // Restricted Delete Protocol
 
 module.exports = router;

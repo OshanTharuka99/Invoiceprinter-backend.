@@ -67,8 +67,29 @@ const quotationSchema = new mongoose.Schema({
     currency: { type: String, default: 'primary' },
     status: {
         type: String,
-        enum: ['Draft', 'Sent', 'Approved', 'Rejected'],
+        enum: ['Draft', 'Sent', 'Approved', 'Rejected', 'Cancelled'],
         default: 'Draft'
+    },
+    cancelledBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
+    cancellationNote: {
+        type: String,
+        trim: true,
+        default: ''
+    },
+    statusHistory: [{
+        status: { type: String, trim: true },
+        note: { type: String, trim: true, default: '' },
+        editedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        editedAt: { type: Date, default: Date.now }
+    }],
+    originalQuotationRef: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Quotation',
+        default: null
     },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,

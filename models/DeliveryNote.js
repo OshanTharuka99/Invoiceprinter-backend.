@@ -49,6 +49,7 @@ const deliveryNoteSchema = new mongoose.Schema({
         },
         manualName: { type: String, trim: true },
         quantity: { type: Number, required: true, min: 0 },
+        unitCost: { type: Number, default: 0, min: 0 },
         serialNumbers: [{ type: String, trim: true }]
     }],
     terms: {

@@ -73,6 +73,7 @@ const invoiceSchema = new mongoose.Schema({
         manualName: { type: String, trim: true },
         quantity: { type: Number, required: true, min: 0 },
         unitPrice: { type: Number, required: true, min: 0 },
+        unitCost: { type: Number, default: 0, min: 0 },
         lineTotal: { type: Number, required: true, min: 0 },
         serialNumbers: [{ type: String, trim: true }]
     }],
@@ -99,6 +100,11 @@ const invoiceSchema = new mongoose.Schema({
     deliveryNoteRef: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'DeliveryNote',
+        default: null
+    },
+    quotationRef: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Quotation',
         default: null
     },
     originalInvoiceRef: {

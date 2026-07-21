@@ -119,26 +119,35 @@ exports.createProduct = async (req, res) => {
 
 exports.getProducts = async (req, res) => {
     try {
-        const products = await Product.find().populate('category').sort({ createdAt: -1 });
+        const includeSerials = String(req.query.includeSerials || '').toLowerCase() === 'true';
+        const products = await Product.find()
+            .populate('category', 'name code')
+            .sort({ createdAt: -1 })
+            .lean();
 
-        // Attach available serial numbers from stock entries for serial-tracked products
+        if (!includeSerials) {
+            return res.status(200).json({ success: true, data: products });
+        }
+
+        // Attach available serial numbers only when explicitly requested (invoice/quotation forms)
         const productIds = products.map(p => p._id);
-        const stockEntries = await StockEntry.find({ product: { $in: productIds } });
+        const stockEntries = await StockEntry.find({
+            product: { $in: productIds },
+            hasSerialNumbers: true,
+            'serialNumbers.0': { $exists: true },
+        }).select('product serialNumbers').lean();
+
         const serialsByProduct = {};
         for (const entry of stockEntries) {
             const pid = entry.product.toString();
             if (!serialsByProduct[pid]) serialsByProduct[pid] = [];
-            if (entry.hasSerialNumbers && entry.serialNumbers.length > 0) {
-                serialsByProduct[pid].push(...entry.serialNumbers);
-            }
+            serialsByProduct[pid].push(...(entry.serialNumbers || []));
         }
 
-        const enrichedProducts = products.map(p => {
-            const doc = p.toObject();
-            const pid = p._id.toString();
-            doc.availableSerials = serialsByProduct[pid] || [];
-            return doc;
-        });
+        const enrichedProducts = products.map(p => ({
+            ...p,
+            availableSerials: serialsByProduct[p._id.toString()] || [],
+        }));
 
         res.status(200).json({ success: true, data: enrichedProducts });
     } catch (error) {
@@ -192,7 +201,17 @@ exports.deleteProduct = async (req, res) => {
 exports.addStockEntry = async (req, res) => {
     try {
         const productId = req.params.id;
-        const { location, buyingPrice, quantity, warrantyPeriod, serialNumbers, notes } = req.body;
+        const {
+            location,
+            buyingPrice,
+            quantity,
+            warrantyPeriod,
+            serialNumbers,
+            notes,
+            supplierRef,
+            supplierInvoiceNumber,
+            supplierDeliveryNumber,
+        } = req.body;
 
         const product = await Product.findById(productId);
         if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
@@ -266,6 +285,13 @@ exports.addStockEntry = async (req, res) => {
             warrantyPeriod: warrantyPeriod || '',
             serialNumbers: processedSerials,
             hasSerialNumbers: processedSerials.length > 0,
+            supplierRef: supplierRef || null,
+            supplierInvoiceNumber: supplierInvoiceNumber
+                ? String(supplierInvoiceNumber).trim().toUpperCase()
+                : '',
+            supplierDeliveryNumber: supplierDeliveryNumber
+                ? String(supplierDeliveryNumber).trim().toUpperCase()
+                : '',
             notes: notes || '',
             addedBy: req.user._id,
         });
@@ -273,7 +299,9 @@ exports.addStockEntry = async (req, res) => {
         // Atomically increment product quantity
         await Product.findByIdAndUpdate(productId, { $inc: { quantity: qty } });
 
-        const populated = await StockEntry.findById(entry._id).populate('addedBy', 'name username');
+        const populated = await StockEntry.findById(entry._id)
+            .populate('addedBy', 'name username')
+            .populate('supplierRef', 'name supplierId');
         res.status(201).json({ success: true, data: populated });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
@@ -284,6 +312,7 @@ exports.getStockEntries = async (req, res) => {
     try {
         const entries = await StockEntry.find({ product: req.params.id })
             .populate('addedBy', 'name username')
+            .populate('supplierRef', 'name supplierId')
             .sort({ createdAt: -1 });
         res.status(200).json({ success: true, data: entries });
     } catch (error) {

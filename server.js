@@ -35,6 +35,11 @@ const notificationRoutes = require('./routes/notificationRoutes');
 const warrantyRoutes = require('./routes/warrantyRoutes');
 const purchaseOrderRoutes = require('./routes/purchaseOrderRoutes');
 const deliveryNoteRoutes = require('./routes/deliveryNoteRoutes');
+const salesReturnRoutes = require('./routes/salesReturnRoutes');
+const goodsReturnRoutes = require('./routes/goodsReturnRoutes');
+const rmaRoutes = require('./routes/rmaRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
+const promaInvoiceRoutes = require('./routes/promaInvoiceRoutes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -49,13 +54,20 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/warranties', warrantyRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/delivery-notes', deliveryNoteRoutes);
+app.use('/api/sales-returns', salesReturnRoutes);
+app.use('/api/goods-returns', goodsReturnRoutes);
+app.use('/api/rma', rmaRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/proma-invoices', promaInvoiceRoutes);
 
 app.get('/', (req, res) => {
     res.send('Invoice Printer API is running...');
 });
 
 // MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI)
+mongoose.connect(process.env.MONGODB_URI, {
+    maxPoolSize: 20,
+})
     .then(() => console.log('MongoDB connected successfully'))
     .catch(err => console.log('MongoDB connection error:', err));
 

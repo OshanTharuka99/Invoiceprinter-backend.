@@ -14,41 +14,56 @@ const appliedTaxSchema = new mongoose.Schema({
     amount: { type: Number, default: 0 }
 }, { _id: false });
 
-const purchaseOrderSchema = new mongoose.Schema({
-    poNumber: {
+const promaInvoiceSchema = new mongoose.Schema({
+    promaInvoiceNumber: {
         type: String,
         required: true,
         unique: true,
-        uppercase: true // PO00001 format (5 digits)
+        uppercase: true
+    },
+    invoiceDate: {
+        type: Date,
+        default: Date.now
     },
     creationMethod: {
         type: String,
         enum: ['automatic', 'manual'],
         required: true
     },
-    supplierRef: {
+    clientRef: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Supplier',
+        ref: 'Client'
+    },
+    manualClientDetails: {
+        title: { type: String, default: 'Mr' },
+        organization: { type: String, trim: true, default: '' },
+        name: { type: String, trim: true },
+        address: { type: String, trim: true },
+        telephoneNumber: { type: String, trim: true },
+        emailAddress: { type: String, trim: true }
+    },
+    projectId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Project'
+    },
+    paymentMethod: {
+        type: String,
+        enum: ['cash', 'cheque', 'bank_transfer', 'credit'],
         required: true
     },
-    supplierQuotationNumber: {
-        type: String,
-        trim: true,
-        required: true
+    creditPeriod: {
+        duration: { type: Number, default: 0 },
+        unit: { type: String, enum: ['days', 'weeks', 'months'], default: 'days' }
     },
     deliveryAddress: {
         type: String,
         trim: true,
-        required: true
+        default: ''
     },
-    deliveryType: {
+    customerPO: {
         type: String,
-        enum: ['Organization', 'Store'],
-        default: 'Organization'
-    },
-    selectedStoreRef: {
-        type: String, // Store name/id if selected
-        trim: true
+        trim: true,
+        default: ''
     },
     items: [{
         productRef: {
@@ -56,7 +71,7 @@ const purchaseOrderSchema = new mongoose.Schema({
             ref: 'Product'
         },
         manualName: { type: String, trim: true },
-        quantity: { type: Number, required: true, min: 1 },
+        quantity: { type: Number, required: true, min: 0 },
         unitPrice: { type: Number, required: true, min: 0 },
         lineTotal: { type: Number, required: true, min: 0 }
     }],
@@ -70,20 +85,19 @@ const purchaseOrderSchema = new mongoose.Schema({
     currency: { type: String, default: 'primary' },
     status: {
         type: String,
-        enum: ['Draft', 'Sent', 'Approved', 'Rejected', 'Completed', 'Cancelled'],
-        default: 'Draft'
+        enum: ['Paid', 'Unpaid', 'Pending', 'Cancelled'],
+        default: 'Unpaid'
     },
-    poDate: {
-        type: Date,
-        default: Date.now
-    },
-    terms: {
-        type: String,
-        trim: true
-    },
-    notes: {
-        type: String,
-        trim: true
+    statusHistory: [{
+        status: { type: String, required: true },
+        note: { type: String, trim: true },
+        editedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        editedAt: { type: Date, default: Date.now }
+    }],
+    originalPromaInvoiceRef: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'PromaInvoice',
+        default: null
     },
     cancelledBy: {
         type: mongoose.Schema.Types.ObjectId,
@@ -95,17 +109,6 @@ const purchaseOrderSchema = new mongoose.Schema({
         trim: true,
         default: ''
     },
-    statusHistory: [{
-        status: { type: String, trim: true },
-        note: { type: String, trim: true, default: '' },
-        editedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-        editedAt: { type: Date, default: Date.now }
-    }],
-    originalPORef: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'PurchaseOrder',
-        default: null
-    },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -115,4 +118,4 @@ const purchaseOrderSchema = new mongoose.Schema({
     timestamps: true
 });
 
-module.exports = mongoose.model('PurchaseOrder', purchaseOrderSchema);
+module.exports = mongoose.model('PromaInvoice', promaInvoiceSchema);

@@ -30,12 +30,14 @@ exports.updateDetails = async (req, res) => {
             return res.status(403).json({ message: 'Only ROOT or ADMIN users can edit business details.' });
         }
 
+        const payload = { ...req.body };
+
         let details = await BusinessDetails.findOne();
         
         if (!details) {
-            details = await BusinessDetails.create(req.body);
+            details = await BusinessDetails.create(payload);
         } else {
-            details = await BusinessDetails.findOneAndUpdate({}, { ...req.body, updatedBy: req.user._id }, {
+            details = await BusinessDetails.findOneAndUpdate({}, { ...payload, updatedBy: req.user._id }, {
                 new: true,
                 runValidators: true
             });

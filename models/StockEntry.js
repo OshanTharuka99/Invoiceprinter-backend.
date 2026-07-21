@@ -28,7 +28,7 @@ const stockEntrySchema = new mongoose.Schema(
         quantity: {
             type: Number,
             required: [true, 'Quantity is required'],
-            min: [1, 'Quantity must be at least 1'],
+            min: [0, 'Quantity cannot be negative'],
         },
         warrantyPeriod: {
             type: String,
@@ -46,6 +46,25 @@ const stockEntrySchema = new mongoose.Schema(
         hasSerialNumbers: {
             type: Boolean,
             default: false,
+        },
+        supplierRef: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Supplier',
+            default: null,
+        },
+        supplierInvoiceNumber: {
+            type: String,
+            trim: true,
+            uppercase: true,
+            default: '',
+            index: true,
+        },
+        supplierDeliveryNumber: {
+            type: String,
+            trim: true,
+            uppercase: true,
+            default: '',
+            index: true,
         },
         notes: {
             type: String,

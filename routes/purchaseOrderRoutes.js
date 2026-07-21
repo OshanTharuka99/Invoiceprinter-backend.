@@ -9,6 +9,9 @@ router.route('/')
     .get(purchaseOrderController.getPurchaseOrders)
     .post(purchaseOrderController.createPurchaseOrder);
 
+router.route('/:id/edit')
+    .put(restrictTo('root'), purchaseOrderController.editPurchaseOrder);
+
 router.route('/:id')
     .get(purchaseOrderController.getPurchaseOrderById)
     .put(purchaseOrderController.updatePurchaseOrder)

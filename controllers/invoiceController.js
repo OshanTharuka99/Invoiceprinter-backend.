@@ -7,6 +7,13 @@ const StockEntry = require('../models/StockEntry');
 const Project = require('../models/Project');
 const Warranty = require('../models/Warranty');
 const BusinessDetails = require('../models/BusinessDetails');
+const DeliveryNote = require('../models/DeliveryNote');
+const Quotation = require('../models/Quotation');
+const SalesReturnNote = require('../models/SalesReturnNote');
+const {
+    enrichItemsWithUnitCost,
+    enrichItemsWithUnitCostFromDN,
+} = require('../utils/stockCost');
 
 const createNotification = async (recipientId, type, title, message, relatedId = null) => {
     try {
@@ -193,6 +200,53 @@ const validateStockAvailability = async (items, creationMethod, extraStock = [])
     return warnings;
 };
 
+const validateSerialQuantityMatch = async (items) => {
+    const errors = [];
+
+    for (const item of items) {
+        const qty = Number(item.quantity) || 0;
+        const serials = (item.serialNumbers || []).map(s => String(s).trim()).filter(Boolean);
+        const serialCount = serials.length;
+
+        if (!item.productRef) {
+            if (serialCount > 0 && serialCount !== qty) {
+                errors.push({
+                    product: item.manualName || 'Manual item',
+                    quantity: qty,
+                    serialCount,
+                });
+            }
+            continue;
+        }
+
+        const product = await Product.findById(item.productRef).select('name productId');
+        const entries = await StockEntry.find({ product: item.productRef });
+        const tracksSerials = entries.some(e => e.hasSerialNumbers);
+
+        if (!tracksSerials && serialCount === 0) continue;
+
+        if (serialCount !== qty) {
+            errors.push({
+                product: product?.name || 'Unknown',
+                productId: product?.productId || '',
+                quantity: qty,
+                serialCount,
+            });
+        }
+
+        const uniqueSerials = new Set(serials.map(s => s.toUpperCase()));
+        if (uniqueSerials.size !== serialCount) {
+            errors.push({
+                product: product?.name || 'Unknown',
+                productId: product?.productId || '',
+                message: 'Duplicate serial numbers found in the same item',
+            });
+        }
+    }
+
+    return errors;
+};
+
 const calculateWarrantyExpiry = (startDate, warrantyPeriod) => {
     if (!warrantyPeriod || warrantyPeriod.trim() === '') {
         return null;
@@ -230,13 +284,14 @@ const calculateWarrantyExpiry = (startDate, warrantyPeriod) => {
 exports.getInvoices = async (req, res) => {
     try {
         const invoices = await Invoice.find()
-            .populate('clientRef')
-            .populate('projectId')
+            .populate('clientRef', 'firstName lastName organization clientId telephoneNumber emailAddress address')
+            .populate('projectId', 'projectId name location')
             .populate('createdBy', 'firstName lastName')
             .populate('statusHistory.editedBy', 'firstName lastName')
             .populate('items.productRef', 'name productId warrantyPeriod')
             .populate('deliveryNoteRef', 'deliveryNoteNumber')
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .lean();
         res.status(200).json({ success: true, data: invoices });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -265,11 +320,24 @@ exports.createInvoice = async (req, res) => {
             currency,
             status,
             invoiceDate,
-            deliveryNoteRef
+            deliveryNoteRef,
+            quotationRef
         } = req.body;
 
         if (!items || items.length === 0) {
             return res.status(400).json({ success: false, message: 'At least one item is required' });
+        }
+
+        const serialErrors = await validateSerialQuantityMatch(items);
+        if (serialErrors.length > 0) {
+            const first = serialErrors[0];
+            const detail = first.message
+                || `"${first.product}" requires ${first.quantity} serial number(s), but ${first.serialCount} assigned`;
+            return res.status(400).json({
+                success: false,
+                message: `Serial number count must match item quantity. ${detail}`,
+                serialErrors,
+            });
         }
 
         // Business rule: every invoice must be linked to a project for warranty tracking
@@ -279,6 +347,30 @@ exports.createInvoice = async (req, res) => {
 
         // Skip stock validation & deduction for DN-based invoices (stock already deducted on DN delivery)
         const isFromDN = !!deliveryNoteRef;
+        const isFromQuotation = !!quotationRef;
+
+        if (isFromQuotation) {
+            const quotation = await Quotation.findById(quotationRef);
+            if (!quotation) {
+                return res.status(404).json({ success: false, message: 'Linked quotation not found' });
+            }
+            if (['Cancelled', 'Rejected'].includes(quotation.status)) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Cannot create invoice from a cancelled or rejected quotation.',
+                });
+            }
+            const existingInvoice = await Invoice.findOne({
+                quotationRef: quotation._id,
+                status: { $ne: 'Cancelled' },
+            }).select('invoiceNumber');
+            if (existingInvoice) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Quotation is already linked to invoice ${existingInvoice.invoiceNumber}.`,
+                });
+            }
+        }
 
         if (!isFromDN && (creationMethod === 'automatic' || creationMethod === 'manual')) {
             const stockWarnings = await validateStockAvailability(items, creationMethod);
@@ -311,6 +403,14 @@ exports.createInvoice = async (req, res) => {
         // Enforce Paid status for Cash payment method
         const initialStatus = paymentMethod === 'cash' ? 'Paid' : (status || 'Unpaid');
 
+        let enrichedItems = items;
+        if (!isFromDN) {
+            enrichedItems = await enrichItemsWithUnitCost(items, creationMethod);
+        } else {
+            const dn = await DeliveryNote.findById(deliveryNoteRef).select('items');
+            enrichedItems = await enrichItemsWithUnitCostFromDN(items, dn?.items || []);
+        }
+
         const invoiceData = {
             invoiceNumber,
             creationMethod,
@@ -321,7 +421,7 @@ exports.createInvoice = async (req, res) => {
             creditPeriod: creditPeriod || { duration: 0, unit: 'days' },
             deliveryAddress: deliveryAddress || '',
             customerPO: customerPO || '',
-            items,
+            items: enrichedItems,
             subTotal,
             appliedDiscounts: appliedDiscounts || [],
             discountTotal: discountTotal || 0,
@@ -339,6 +439,7 @@ exports.createInvoice = async (req, res) => {
             }],
             invoiceDate: invoiceDate || Date.now(),
             deliveryNoteRef: isFromDN ? deliveryNoteRef : null,
+            quotationRef: isFromQuotation ? quotationRef : null,
             createdBy: req.user._id
         };
 
@@ -522,6 +623,18 @@ exports.editInvoice = async (req, res) => {
             return res.status(400).json({ success: false, message: 'A project must be selected' });
         }
 
+        const serialErrors = await validateSerialQuantityMatch(items);
+        if (serialErrors.length > 0) {
+            const first = serialErrors[0];
+            const detail = first.message
+                || `"${first.product}" requires ${first.quantity} serial number(s), but ${first.serialCount} assigned`;
+            return res.status(400).json({
+                success: false,
+                message: `Serial number count must match item quantity. ${detail}`,
+                serialErrors,
+            });
+        }
+
         const isFromDN = !!originalInvoice.deliveryNoteRef;
         const method = creationMethod || originalInvoice.creationMethod;
 
@@ -580,6 +693,14 @@ exports.editInvoice = async (req, res) => {
 
         const initialStatus = paymentMethod === 'cash' ? 'Paid' : (status || 'Unpaid');
 
+        let enrichedItems = items;
+        if (!isFromDN) {
+            enrichedItems = await enrichItemsWithUnitCost(items, method);
+        } else if (originalInvoice.deliveryNoteRef) {
+            const dn = await DeliveryNote.findById(originalInvoice.deliveryNoteRef).select('items');
+            enrichedItems = await enrichItemsWithUnitCostFromDN(items, dn?.items || []);
+        }
+
         const newHistory = [...originalInvoice.statusHistory, {
             status: initialStatus,
             note: `Created as edit of ${originalInvoice.invoiceNumber}`,
@@ -598,7 +719,7 @@ exports.editInvoice = async (req, res) => {
             creditPeriod: creditPeriod || { duration: 0, unit: 'days' },
             deliveryAddress: deliveryAddress || '',
             customerPO: customerPO || '',
-            items,
+            items: enrichedItems,
             subTotal,
             appliedDiscounts: appliedDiscounts || [],
             discountTotal: discountTotal || 0,
@@ -681,12 +802,19 @@ exports.editInvoice = async (req, res) => {
 
 exports.deleteInvoice = async (req, res) => {
     try {
+        const { reason } = req.body;
+        if (!reason || !String(reason).trim()) {
+            return res.status(400).json({ success: false, message: 'Deletion reason is required' });
+        }
+
         const invoice = await Invoice.findById(req.params.id);
         if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
 
         if (!isWithinEditWindow(invoice.createdAt)) {
             return res.status(403).json({ success: false, message: 'Invoice can only be deleted within 30 days of creation' });
         }
+
+        const trimmedReason = String(reason).trim();
 
         // Skip stock reversal/warranty deletion for DN-based invoices (stock handled at DN level)
         const isFromDN = !!invoice.deliveryNoteRef;
@@ -697,9 +825,11 @@ exports.deleteInvoice = async (req, res) => {
 
         // Soft delete the invoice by setting status to Cancelled
         invoice.status = 'Cancelled';
+        invoice.cancelledBy = req.user._id;
+        invoice.cancellationNote = trimmedReason;
         invoice.statusHistory.push({
             status: 'Cancelled',
-            note: 'Invoice deleted/nullified',
+            note: `Invoice deleted. Reason: ${trimmedReason}`,
             editedBy: req.user._id,
             editedAt: Date.now()
         });
@@ -747,6 +877,10 @@ exports.getInvoiceStats = async (req, res) => {
             { $match: activeMatch },
             { $group: { _id: null, total: { $sum: '$finalTotal' } } }
         ]);
+        const totalReturns = await SalesReturnNote.aggregate([
+            { $match: { createdAt: { $gte: start, $lt: end } } },
+            { $group: { _id: null, total: { $sum: '$returnAmount' } } },
+        ]);
 
         const paymentMethodBreakdown = await Invoice.aggregate([
             { $match: activeMatch },
@@ -775,6 +909,47 @@ exports.getInvoiceStats = async (req, res) => {
             .sort({ createdAt: -1 })
             .limit(10);
 
+        const profitAgg = await Invoice.aggregate([
+            { $match: activeMatch },
+            {
+                $addFields: {
+                    itemCost: {
+                        $sum: {
+                            $map: {
+                                input: { $ifNull: ['$items', []] },
+                                as: 'item',
+                                in: {
+                                    $multiply: [
+                                        { $ifNull: ['$$item.unitCost', 0] },
+                                        { $ifNull: ['$$item.quantity', 0] },
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                    netRevenue: {
+                        $subtract: [
+                            { $ifNull: ['$subTotal', 0] },
+                            { $ifNull: ['$discountTotal', 0] },
+                        ],
+                    },
+                },
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalCost: { $sum: '$itemCost' },
+                    totalRevenue: { $sum: '$netRevenue' },
+                    totalProfit: { $sum: { $subtract: ['$netRevenue', '$itemCost'] } },
+                },
+            },
+        ]);
+
+        const profitData = profitAgg[0] || { totalCost: 0, totalRevenue: 0, totalProfit: 0 };
+        const profitMargin = profitData.totalRevenue > 0
+            ? Math.round((profitData.totalProfit / profitData.totalRevenue) * 1000) / 10
+            : 0;
+
         res.status(200).json({
             success: true,
             data: {
@@ -783,6 +958,12 @@ exports.getInvoiceStats = async (req, res) => {
                 totalInvoices,
                 cancelledCount,
                 totalSales: totalSales[0]?.total || 0,
+                totalReturns: totalReturns[0]?.total || 0,
+                netSales: (totalSales[0]?.total || 0) - (totalReturns[0]?.total || 0),
+                totalCost: profitData.totalCost,
+                totalRevenue: profitData.totalRevenue,
+                totalProfit: profitData.totalProfit,
+                profitMargin,
                 paymentMethodBreakdown,
                 statusBreakdown,
                 salesOverTime,
@@ -859,6 +1040,8 @@ exports.approveDeleteRequest = async (req, res) => {
 
         // Soft delete the invoice by setting status to Cancelled
         invoice.status = 'Cancelled';
+        invoice.cancelledBy = req.user._id;
+        invoice.cancellationNote = request.reason;
         invoice.statusHistory.push({
             status: 'Cancelled',
             note: `Invoice deleted via approved request. Reason: ${request.reason}`,

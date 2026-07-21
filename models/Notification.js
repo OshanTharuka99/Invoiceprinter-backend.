@@ -8,7 +8,7 @@ const notificationSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ['delete_request', 'approval', 'rejection', 'general'],
+        enum: ['delete_request', 'approval', 'rejection', 'general', 'rma_assignment', 'rma_update', 'rma_overdue', 'inventory_request'],
         default: 'general'
     },
     title: {
