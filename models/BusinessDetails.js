@@ -146,11 +146,13 @@ const businessDetailsSchema = new mongoose.Schema({
     quotationDigits: { type: Number, default: 5 },
     quotationTitleColor: { type: String, default: '#0f172a' },
     quotationDividerColor: { type: String, default: '#0f172a' },
+    quotationTemplateFormat: { type: String, enum: ['format1', 'format2'], default: 'format1' },
 
     invoicePrefix: { type: String, default: 'INV', trim: true },
     invoiceDigits: { type: Number, default: 5 },
     invoiceTitleColor: { type: String, default: '#0f172a' },
     invoiceDividerColor: { type: String, default: '#0f172a' },
+    invoiceTemplateFormat: { type: String, enum: ['format1', 'format2'], default: 'format1' },
 
     promaInvoicePrefix: { type: String, default: 'PI', trim: true },
     promaInvoiceDigits: { type: Number, default: 5 },

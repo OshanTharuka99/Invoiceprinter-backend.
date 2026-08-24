@@ -29,6 +29,31 @@ const createNotification = async (recipientId, type, title, message, relatedId =
     }
 };
 
+const resolveAdvancePayment = (finalTotal, hasAdvancePayment, advanceAmount) => {
+    const total = Number(finalTotal) || 0;
+    const hasAdvance = !!hasAdvancePayment;
+    const advance = hasAdvance ? Math.max(0, Number(advanceAmount) || 0) : 0;
+
+    if (hasAdvance && advance <= 0) {
+        return { error: 'Advance amount must be greater than zero when advance payment is selected' };
+    }
+    if (advance > total) {
+        return { error: 'Advance amount cannot exceed the invoice total' };
+    }
+
+    return {
+        hasAdvancePayment: hasAdvance,
+        advanceAmount: advance,
+        balanceDue: total - advance,
+    };
+};
+
+const resolveInitialStatus = (paymentMethod, status, balanceDue) => {
+    if (paymentMethod === 'cash') return 'Paid';
+    if (balanceDue <= 0) return 'Paid';
+    return status || 'Unpaid';
+};
+
 const EDIT_DELETE_WINDOW_DAYS = 30;
 
 const isWithinEditWindow = (createdAt) => {
@@ -321,7 +346,9 @@ exports.createInvoice = async (req, res) => {
             status,
             invoiceDate,
             deliveryNoteRef,
-            quotationRef
+            quotationRef,
+            hasAdvancePayment,
+            advanceAmount
         } = req.body;
 
         if (!items || items.length === 0) {
@@ -400,8 +427,12 @@ exports.createInvoice = async (req, res) => {
         }
         const invoiceNumber = `${prefix}${sequence.toString().padStart(digits, '0')}`;
 
-        // Enforce Paid status for Cash payment method
-        const initialStatus = paymentMethod === 'cash' ? 'Paid' : (status || 'Unpaid');
+        const advance = resolveAdvancePayment(finalTotal, hasAdvancePayment, advanceAmount);
+        if (advance.error) {
+            return res.status(400).json({ success: false, message: advance.error });
+        }
+
+        const initialStatus = resolveInitialStatus(paymentMethod, status, advance.balanceDue);
 
         let enrichedItems = items;
         if (!isFromDN) {
@@ -429,6 +460,9 @@ exports.createInvoice = async (req, res) => {
             appliedTaxes: appliedTaxes || [],
             taxTotal: taxTotal || 0,
             finalTotal,
+            hasAdvancePayment: advance.hasAdvancePayment,
+            advanceAmount: advance.advanceAmount,
+            balanceDue: advance.balanceDue,
             currency: currency || 'primary',
             status: initialStatus,
             statusHistory: [{
@@ -613,7 +647,9 @@ exports.editInvoice = async (req, res) => {
             currency,
             status,
             invoiceDate,
-            editNote
+            editNote,
+            hasAdvancePayment,
+            advanceAmount
         } = req.body;
 
         if (!items || items.length === 0) {
@@ -691,7 +727,12 @@ exports.editInvoice = async (req, res) => {
         }
         const newInvoiceNumber = `${prefix}${sequence.toString().padStart(digits, '0')}`;
 
-        const initialStatus = paymentMethod === 'cash' ? 'Paid' : (status || 'Unpaid');
+        const advance = resolveAdvancePayment(finalTotal, hasAdvancePayment, advanceAmount);
+        if (advance.error) {
+            return res.status(400).json({ success: false, message: advance.error });
+        }
+
+        const initialStatus = resolveInitialStatus(paymentMethod, status, advance.balanceDue);
 
         let enrichedItems = items;
         if (!isFromDN) {
@@ -727,6 +768,9 @@ exports.editInvoice = async (req, res) => {
             appliedTaxes: appliedTaxes || [],
             taxTotal: taxTotal || 0,
             finalTotal,
+            hasAdvancePayment: advance.hasAdvancePayment,
+            advanceAmount: advance.advanceAmount,
+            balanceDue: advance.balanceDue,
             currency: currency || 'primary',
             status: initialStatus,
             statusHistory: newHistory,

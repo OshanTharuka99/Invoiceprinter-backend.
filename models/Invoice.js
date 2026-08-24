@@ -84,6 +84,9 @@ const invoiceSchema = new mongoose.Schema({
     appliedTaxes: [appliedTaxSchema],
     taxTotal: { type: Number, default: 0 },
     finalTotal: { type: Number, required: true, min: 0 },
+    hasAdvancePayment: { type: Boolean, default: false },
+    advanceAmount: { type: Number, default: 0, min: 0 },
+    balanceDue: { type: Number, default: 0, min: 0 },
     currency: { type: String, default: 'primary' },
     status: {
         type: String,
