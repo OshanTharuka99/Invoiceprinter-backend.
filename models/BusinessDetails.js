@@ -71,6 +71,10 @@ const businessDetailsSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    businessTinNumber: {
+        type: String,
+        trim: true
+    },
     vatNumber: {
         type: String,
         trim: true

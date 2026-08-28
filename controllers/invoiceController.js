@@ -434,12 +434,17 @@ exports.createInvoice = async (req, res) => {
 
         const initialStatus = resolveInitialStatus(paymentMethod, status, advance.balanceDue);
 
-        let enrichedItems = items;
+        const cleanedItems = (items || []).map(i => {
+            if (i.productRef === '') i.productRef = undefined;
+            return i;
+        });
+
+        let enrichedItems = cleanedItems;
         if (!isFromDN) {
-            enrichedItems = await enrichItemsWithUnitCost(items, creationMethod);
+            enrichedItems = await enrichItemsWithUnitCost(cleanedItems, creationMethod);
         } else {
             const dn = await DeliveryNote.findById(deliveryNoteRef).select('items');
-            enrichedItems = await enrichItemsWithUnitCostFromDN(items, dn?.items || []);
+            enrichedItems = await enrichItemsWithUnitCostFromDN(cleanedItems, dn?.items || []);
         }
 
         const invoiceData = {
@@ -480,7 +485,7 @@ exports.createInvoice = async (req, res) => {
         const invoice = await Invoice.create(invoiceData);
 
         if (!isFromDN) {
-            await applyStockDeductions(items, creationMethod);
+            await applyStockDeductions(cleanedItems, creationMethod);
         }
 
         if (projectId) {
