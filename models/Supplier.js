@@ -4,8 +4,7 @@ const supplierSchema = new mongoose.Schema({
     supplierId: {
         type: String,
         required: true,
-        unique: true,
-        uppercase: true
+        unique: true
     },
     name: {
         type: String,

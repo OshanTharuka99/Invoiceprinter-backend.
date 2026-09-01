@@ -6,6 +6,14 @@ const businessDetailsSchema = new mongoose.Schema({
         required: [true, 'Business Name is required'],
         trim: true
     },
+    organizationCode: {
+        type: String,
+        trim: true,
+        default: ''
+    },
+    organizationCodeDocument: {
+        type: String
+    },
     businessType: {
         type: String,
         enum: ['Owner', 'Partnership', 'Pvt Ltd'],

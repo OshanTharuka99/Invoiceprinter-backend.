@@ -1,15 +1,10 @@
 const Client = require('../models/Client');
 const ClientEditRequest = require('../models/ClientEditRequest');
+const { nextObjectId } = require('../utils/objectId');
 
 exports.createClient = async (req, res, next) => {
     try {
-        const latest = await Client.findOne().sort({ createdAt: -1 });
-        let sequence = 1;
-        if (latest && latest.clientId && latest.clientId.startsWith('CLI_')) {
-            const num = parseInt(latest.clientId.split('_')[1], 10);
-            if (!isNaN(num)) sequence = num + 1;
-        }
-        const clientId = `CLI_${sequence.toString().padStart(4, '0')}`;
+        const clientId = await nextObjectId(Client, 'Client', 'clientId');
 
         const client = await Client.create({ ...req.body, clientId });
         res.status(201).json({ success: true, data: client });

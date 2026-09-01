@@ -1,4 +1,5 @@
 const BusinessDetails = require('../models/BusinessDetails');
+const { migrateOrgCodePrefix } = require('../utils/orgCodeMigration');
 
 exports.getDetails = async (req, res) => {
     try {
@@ -33,7 +34,13 @@ exports.updateDetails = async (req, res) => {
         const payload = { ...req.body };
 
         let details = await BusinessDetails.findOne();
-        
+
+        // When the organization code changes, migrate existing custom IDs to the new code
+        let orgCodeMigration = null;
+        if (details && payload.organizationCode !== undefined) {
+            orgCodeMigration = await migrateOrgCodePrefix(details.organizationCode, payload.organizationCode);
+        }
+
         if (!details) {
             details = await BusinessDetails.create(payload);
         } else {
@@ -43,7 +50,11 @@ exports.updateDetails = async (req, res) => {
             });
         }
 
-        res.status(200).json({ status: 'success', data: { details } });
+        res.status(200).json({
+            status: 'success',
+            data: { details },
+            ...(orgCodeMigration ? { orgCodeMigration } : {})
+        });
     } catch (error) {
         res.status(400).json({ status: 'fail', message: error.message });
     }

@@ -6,6 +6,7 @@ const AuditLog = require('../models/AuditLog');
 const InventoryEditRequest = require('../models/InventoryEditRequest');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
+const { nextObjectId } = require('../utils/objectId');
 
 const createNotification = async (recipientId, type, title, message, relatedId = null) => {
     try {
@@ -18,7 +19,8 @@ const createNotification = async (recipientId, type, title, message, relatedId =
 
 exports.createCategory = async (req, res) => {
     try {
-        const { name, code, parentCategory } = req.body;
+        const { name, parentCategory } = req.body;
+        const code = await nextObjectId(Category, 'Category', 'code');
         const category = await Category.create({ name, code, parentCategory: parentCategory || null });
         res.status(201).json({ success: true, data: category });
     } catch (error) {
@@ -85,19 +87,7 @@ exports.createProduct = async (req, res) => {
         const categoryDoc = await Category.findById(category);
         if (!categoryDoc) return res.status(404).json({ success: false, message: 'Category not found' });
 
-        const codePrefix = categoryDoc.code.toUpperCase();
-        const latestProduct = await Product.findOne({
-            productId: { $regex: `^${codePrefix}` },
-        }).sort({ productId: -1 });
-
-        let sequence = 1;
-        if (latestProduct) {
-            const lastSequenceStr = latestProduct.productId.replace(codePrefix, '');
-            const lastSequence = parseInt(lastSequenceStr, 10);
-            if (!isNaN(lastSequence)) sequence = lastSequence + 1;
-        }
-
-        const productId = `${codePrefix}${sequence.toString().padStart(5, '0')}`;
+        const productId = await nextObjectId(Product, 'Product', 'productId');
 
         const product = await Product.create({
             productId,
@@ -273,8 +263,7 @@ exports.addStockEntry = async (req, res) => {
         }
 
         // Generate unique batch reference
-        const batchCount = await StockEntry.countDocuments({ product: productId });
-        const batchRef = `${product.productId}-BATCH-${(batchCount + 1).toString().padStart(3, '0')}`;
+        const batchRef = await nextObjectId(StockEntry, 'StockEntry', 'batchRef');
 
         const entry = await StockEntry.create({
             product: productId,

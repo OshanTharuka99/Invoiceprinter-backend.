@@ -11,9 +11,7 @@ const categorySchema = new mongoose.Schema({
         type: String,
         required: [true, 'Category Code is required'],
         trim: true,
-        unique: true,
-        uppercase: true,
-        maxlength: 10
+        unique: true
     },
     parentCategory: {
         type: mongoose.Schema.Types.ObjectId,

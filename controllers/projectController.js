@@ -1,14 +1,9 @@
 const Project = require('../models/Project');
+const { nextObjectId } = require('../utils/objectId');
 
 exports.createProject = async (req, res) => {
     try {
-        const latest = await Project.findOne().sort({ createdAt: -1 });
-        let sequence = 1;
-        if (latest && latest.projectId && latest.projectId.startsWith('PRO_ID_')) {
-            const num = parseInt(latest.projectId.split('_')[2], 10);
-            if (!isNaN(num)) sequence = num + 1;
-        }
-        const projectId = `PRO_ID_${sequence.toString().padStart(4, '0')}`;
+        const projectId = await nextObjectId(Project, 'Project', 'projectId');
 
         const project = await Project.create({ ...req.body, projectId });
         res.status(201).json({ success: true, data: project });

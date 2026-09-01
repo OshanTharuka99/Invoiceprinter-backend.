@@ -1,14 +1,9 @@
 const Supplier = require('../models/Supplier');
+const { nextObjectId } = require('../utils/objectId');
 
 exports.createSupplier = async (req, res) => {
     try {
-        const latest = await Supplier.findOne().sort({ createdAt: -1 });
-        let sequence = 1;
-        if (latest && latest.supplierId && latest.supplierId.startsWith('SUP_')) {
-            const num = parseInt(latest.supplierId.split('_')[1], 10);
-            if (!isNaN(num)) sequence = num + 1;
-        }
-        const supplierId = `SUP_${sequence.toString().padStart(4, '0')}`;
+        const supplierId = await nextObjectId(Supplier, 'Supplier', 'supplierId');
 
         const supplier = await Supplier.create({ ...req.body, supplierId });
         res.status(201).json({ success: true, data: supplier });
